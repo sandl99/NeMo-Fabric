@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -141,6 +142,8 @@ _config = partial(
             "nvidia.fabric.openclaw",
             {
                 "openclaw_command": "/opt/openclaw/bin/openclaw",
+                "plugin_paths": ["plugins/brave"],
+                "web_search_provider": "brave",
                 "port_range": {"start": 19001, "end": 19111},
                 "startup_timeout_seconds": 20,
                 "shutdown_timeout_seconds": 5,
@@ -220,6 +223,29 @@ def test_openclaw_rejects_agent_runtime_setting(tmp_path: Path):
         Fabric().plan(
             _config(
                 {"agent_runtime": "codex"},
+                adapter_id="nvidia.fabric.openclaw",
+            ),
+            base_dir=tmp_path,
+        )
+
+
+@pytest.mark.parametrize(
+    ("settings", "path"),
+    [
+        ({"web_search_provider": ""}, "harness.settings.web_search_provider"),
+        ({"web_search_provider": "   "}, "harness.settings.web_search_provider"),
+        ({"web_search_provider": 1}, "harness.settings.web_search_provider"),
+        ({"plugin_paths": "plugins"}, "harness.settings.plugin_paths"),
+        ({"plugin_paths": [" "]}, "harness.settings.plugin_paths"),
+    ],
+)
+def test_openclaw_rejects_invalid_web_search_settings(
+    tmp_path: Path, settings: dict[str, Any], path: str
+):
+    with pytest.raises(FabricConfigError, match=re.escape(path)):
+        Fabric().plan(
+            _config(
+                settings,
                 adapter_id="nvidia.fabric.openclaw",
             ),
             base_dir=tmp_path,

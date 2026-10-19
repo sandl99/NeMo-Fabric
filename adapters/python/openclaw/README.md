@@ -76,6 +76,8 @@ The following settings are specific to the OpenClaw adapter:
 | `openclaw_command` | `openclaw` | Executable name or path. |
 | `agent_id` | `default` | OpenClaw agent for NeMo Fabric-originated invocations. |
 | `channel_config` | None | OpenClaw-native `channels` and `bindings` for a prepared service. Every binding must target `agent_id`. Managed runtimes reject this setting. |
+| `plugin_paths` | None | Directories of installed OpenClaw plugins for the Gateway to load. Relative paths are resolved from the NeMo Fabric base directory. |
+| `web_search_provider` | None | OpenClaw web search provider ID, such as `brave` or `tavily`. OpenClaw enables the plugin that provides it. |
 | `port_range` | Random available range | Inclusive consumer-allocated range with `start` and `end` fields; it must span at least 111 ports. |
 | `startup_timeout_seconds` | `30` | Gateway startup timeout. |
 | `shutdown_timeout_seconds` | `10` | Graceful shutdown timeout. |
@@ -83,6 +85,35 @@ The following settings are specific to the OpenClaw adapter:
 | `read_timeout_seconds` | `600` | Local HTTP response timeout. |
 
 OpenClaw's [derived-port mapping](https://docs.openclaw.ai/gateway/multiple-gateways#port-mapping-derived) uses `base_port + 2` for browser control and allocates browser CDP ports from `base_port + 11` through `base_port + 110`. Set `port_range` when the consumer reserves a port range before configuring NeMo Fabric; the adapter selects a base whose complete derived footprint fits inside that range. The adapter verifies only that `base_port` and `base_port + 2` are available before startup. OpenClaw allocates the CDP ports on demand instead of reserving the complete range, so the adapter cannot guarantee that those ports will still be available when OpenClaw needs them. Keep the configured range reserved for the lifetime of the runtime when using OpenClaw browser features.
+
+### Web Search
+
+OpenClaw searches the web through provider plugins, such as Brave and Tavily.
+The adapter runs OpenClaw with its own state directory, so it does not load
+plugins installed under `~/.openclaw`. Install the plugin version that matches
+OpenClaw into a directory, list that directory in `plugin_paths`, and set the
+provider's API key in the runtime environment:
+
+```bash
+npm pack @openclaw/brave-plugin@2026.9.4
+OPENCLAW_STATE_DIR=/opt/openclaw-plugins openclaw plugins install \
+  --force --accept-capabilities ./openclaw-brave-plugin-2026.9.4.tgz
+export BRAVE_API_KEY=...
+```
+
+Review the plugin before you accept its capabilities. OpenClaw installs an
+archive under `<state directory>/extensions/<plugin ID>`.
+
+```python
+settings = {
+    "plugin_paths": ["/opt/openclaw-plugins/extensions"],
+    "web_search_provider": "brave",
+}
+```
+
+Without `web_search_provider`, OpenClaw chooses a provider from the API keys it
+finds. OpenClaw rejects an unknown provider ID before the Gateway starts. When
+`tools.enabled` is set, include `web_search` in it.
 
 Relay telemetry and native OpenTelemetry are not supported.
 

@@ -84,6 +84,37 @@ Every binding must target the configured `agent_id`; OpenClaw validates the
 nested channel settings. Chat-channel traffic goes directly between the
 channel and OpenClaw rather than through a NeMo Fabric runtime.
 
+OpenClaw searches the web through provider plugins, such as Brave and Tavily.
+The adapter runs OpenClaw with its own state directory, so it does not load
+plugins installed under `~/.openclaw`. List the directory of installed plugins
+in `plugin_paths`, and optionally choose a provider with `web_search_provider`:
+
+```python
+from nemo_fabric import HarnessConfig
+
+harness = HarnessConfig(
+    adapter_id="nvidia.fabric.openclaw",
+    settings={
+        "plugin_paths": ["/opt/openclaw-plugins/extensions"],
+        "web_search_provider": "brave",
+    },
+)
+```
+
+Install the plugin version that matches OpenClaw. Review the plugin before you
+accept its capabilities:
+
+```bash
+npm pack @openclaw/brave-plugin@2026.9.4
+OPENCLAW_STATE_DIR=/opt/openclaw-plugins openclaw plugins install \
+  --force --accept-capabilities ./openclaw-brave-plugin-2026.9.4.tgz
+```
+
+The plugin reads its API key, such as `BRAVE_API_KEY`, from the runtime
+environment. Without `web_search_provider`, OpenClaw chooses a provider from the
+API keys it finds. OpenClaw rejects an unknown provider ID before the Gateway
+starts.
+
 By default, the adapter chooses an available local port range. Set `port_range`
 to an inclusive consumer-allocated range with `start` and `end` fields. The
 range must span at least 111 ports. OpenClaw's [derived-port mapping](https://docs.openclaw.ai/gateway/multiple-gateways#port-mapping-derived) uses `base_port + 2` for browser control and allocates browser CDP ports from `base_port + 11` through `base_port + 110`. The adapter verifies only that `base_port` and `base_port + 2` are available before startup. OpenClaw allocates the CDP ports on demand instead of reserving the complete range, so the adapter cannot guarantee that those ports will still be available when OpenClaw needs them. Keep the configured range reserved for the lifetime of the runtime or service when using OpenClaw browser features.

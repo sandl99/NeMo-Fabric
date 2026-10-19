@@ -1563,6 +1563,15 @@
               "minLength": 1,
               "type": "string"
             },
+            "plugin_paths": {
+              "description": "Directories of installed OpenClaw plugins for the Gateway to load. Relative paths are resolved from the NeMo Fabric base directory. The adapter's isolated state directory does not include plugins installed under the user's OpenClaw state directory.",
+              "items": {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              "type": "array"
+            },
             "port_range": {
               "additionalProperties": false,
               "description": "Inclusive consumer-allocated port range. The adapter selects a Gateway base port whose complete derived footprint through base + 110 fits within the range. When omitted, the adapter selects an available local range.",
@@ -1601,6 +1610,12 @@
               "description": "Maximum time to wait for the OpenClaw Gateway to become ready.",
               "exclusiveMinimum": 0,
               "type": "number"
+            },
+            "web_search_provider": {
+              "description": "OpenClaw web search provider ID, such as brave or tavily. OpenClaw enables the plugin that provides it. Make the plugin loadable, for example through plugin_paths; it reads its API key from the environment.",
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
             }
           },
           "type": "object"
@@ -1611,7 +1626,7 @@
         "name": "nemo-fabric-adapters-openclaw",
         "version": "0.6.0"
       },
-      "sha256": "5ab8b29595214e214214b051b60bc314dc65f07add60a73283f434a62e3f7402",
+      "sha256": "0abd4534ddb0e013d5cb911c562aecbf7ede81702a841b285fb375f2eccb75ef",
       "source": "adapters/python/openclaw/openclaw.fabric-adapter.json"
     },
     "nvidia.fabric.opencode": {

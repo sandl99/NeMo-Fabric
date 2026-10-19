@@ -111,6 +111,8 @@ def _validate_attach_config(config: contract.AgentConfig) -> None:
     for name in (
         "openclaw_command",
         "channel_config",
+        "web_search_provider",
+        "plugin_paths",
         "port_range",
         "startup_timeout_seconds",
         "shutdown_timeout_seconds",
@@ -148,6 +150,21 @@ def _agent_id(settings: dict[str, Any]) -> str:
             "openclaw_invalid_configuration",
             "OpenClaw agent_id must be a non-empty string",
             metadata={"field": "harness.settings.agent_id"},
+        )
+    return value.strip()
+
+
+def _web_search_provider(settings: dict[str, Any]) -> str | None:
+    """Return the OpenClaw web search provider ID, if one is selected."""
+
+    value = settings.get("web_search_provider")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise lifecycle.LifecycleError(
+            "openclaw_invalid_configuration",
+            "OpenClaw web_search_provider must be a non-empty string",
+            metadata={"field": "harness.settings.web_search_provider"},
         )
     return value.strip()
 
@@ -279,6 +296,45 @@ def _resolve_skill_paths(config: contract.AgentConfig, base_dir: Path) -> list[s
                 "openclaw_skill_invalid",
                 "NeMo Fabric skill paths must be directories containing a SKILL.md file",
                 metadata={"field": f"skills.paths[{index}]"},
+            )
+        paths.append(str(directory))
+    return paths
+
+
+def _resolve_plugin_paths(settings: dict[str, Any], base_dir: Path) -> list[str]:
+    """Resolve OpenClaw plugin directories outside the isolated state directory."""
+
+    value = settings.get("plugin_paths")
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise lifecycle.LifecycleError(
+            "openclaw_invalid_configuration",
+            "OpenClaw plugin_paths must be an array of non-empty strings",
+            metadata={"field": "harness.settings.plugin_paths"},
+        )
+    paths: list[str] = []
+    for index, path in enumerate(value):
+        field = f"harness.settings.plugin_paths[{index}]"
+        if not isinstance(path, str) or not path.strip():
+            raise lifecycle.LifecycleError(
+                "openclaw_invalid_configuration",
+                "OpenClaw plugin_paths must be an array of non-empty strings",
+                metadata={"field": field},
+            )
+        try:
+            directory = (base_dir / path).resolve(strict=True)
+        except (OSError, RuntimeError):
+            raise lifecycle.LifecycleError(
+                "openclaw_plugin_path_not_found",
+                "A configured OpenClaw plugin path does not exist",
+                metadata={"field": field},
+            ) from None
+        if not directory.is_dir():
+            raise lifecycle.LifecycleError(
+                "openclaw_plugin_path_not_found",
+                "OpenClaw plugin paths must be directories",
+                metadata={"field": field},
             )
         paths.append(str(directory))
     return paths
@@ -485,15 +541,19 @@ def _openclaw_config(
         "update": {"checkOnStart": False},
         "discovery": {"mdns": {"mode": "off"}},
     }
-    agent_id = _agent_id(config.harness.settings if config.harness else {})
+    settings = config.harness.settings if config.harness else {}
+    agent_id = _agent_id(settings)
     result["agents"]["entries"] = {agent_id: {}}
     if config.instructions is not None and config.instructions.system is not None:
         result["agents"]["defaults"]["contextInjection"] = "never"
     skill_paths = _resolve_skill_paths(config, base_dir)
     if skill_paths:
         result["skills"] = {"load": {"extraDirs": skill_paths}}
+    plugin_paths = _resolve_plugin_paths(settings, base_dir)
+    if plugin_paths:
+        result["plugins"] = {"load": {"paths": plugin_paths}}
+    tools: dict[str, Any] = {}
     if config.tools is not None:
-        tools: dict[str, list[str]] = {}
         if config.tools.enabled == []:
             tools["deny"] = ["*"]
         else:
@@ -501,8 +561,12 @@ def _openclaw_config(
                 tools["allow"] = config.tools.enabled
             if config.tools.blocked:
                 tools["deny"] = config.tools.blocked
-        if tools:
-            result["tools"] = tools
+    web_search_provider = _web_search_provider(settings)
+    if web_search_provider is not None:
+        # OpenClaw enables the plugin that provides this ID and rejects unknown IDs.
+        tools["web"] = {"search": {"enabled": True, "provider": web_search_provider}}
+    if tools:
+        result["tools"] = tools
     mcp = _mcp_config(config)
     if mcp:
         result["mcp"] = {"servers": mcp}

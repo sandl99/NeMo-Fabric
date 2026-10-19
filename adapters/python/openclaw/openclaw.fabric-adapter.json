@@ -20,6 +20,17 @@
         "default": "default",
         "description": "OpenClaw agent selected for NeMo Fabric-originated invocations."
       },
+      "plugin_paths": {
+        "type": "array",
+        "items": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "description": "Directories of installed OpenClaw plugins for the Gateway to load. Relative paths are resolved from the NeMo Fabric base directory. The adapter's isolated state directory does not include plugins installed under the user's OpenClaw state directory."
+      },
+      "web_search_provider": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S",
+        "description": "OpenClaw web search provider ID, such as brave or tavily. OpenClaw enables the plugin that provides it. Make the plugin loadable, for example through plugin_paths; it reads its API key from the environment."
+      },
       "channel_config": {
         "type": "object",
         "properties": {

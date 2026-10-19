@@ -386,6 +386,165 @@ def test_openclaw_preserves_context_injection_without_system_instruction(
     assert "contextInjection" not in generated["agents"]["defaults"]
 
 
+def test_openclaw_selects_configured_web_search_provider(
+    mock_openclaw: Path, tmp_path: Path
+):
+    config = _config(mock_openclaw)
+    assert config.harness is not None
+    config.harness.settings["web_search_provider"] = " brave "
+
+    generated = adapter._openclaw_config(
+        config,
+        _context(tmp_path),
+        base_dir=tmp_path,
+        port=20_000,
+        token_env="OPENCLAW_GATEWAY_TOKEN",
+    )
+
+    assert generated["tools"] == {
+        "allow": ["browser", "web_search"],
+        "deny": ["exec"],
+        "web": {"search": {"enabled": True, "provider": "brave"}},
+    }
+
+
+def test_openclaw_selects_web_search_provider_without_tool_policy(tmp_path: Path):
+    config = AgentConfig.from_mapping(
+        {
+            "harness": {"settings": {"web_search_provider": "tavily"}},
+            "models": {"default": {"provider": "test", "model": "fabric-echo"}},
+        }
+    )
+
+    generated = adapter._openclaw_config(
+        config,
+        _context(tmp_path),
+        base_dir=tmp_path,
+        port=20_000,
+        token_env="OPENCLAW_GATEWAY_TOKEN",
+    )
+
+    assert generated["tools"] == {
+        "web": {"search": {"enabled": True, "provider": "tavily"}}
+    }
+
+
+def test_openclaw_leaves_web_search_to_openclaw_by_default(tmp_path: Path):
+    config = AgentConfig.from_mapping(
+        {"models": {"default": {"provider": "test", "model": "fabric-echo"}}}
+    )
+
+    generated = adapter._openclaw_config(
+        config,
+        _context(tmp_path),
+        base_dir=tmp_path,
+        port=20_000,
+        token_env="OPENCLAW_GATEWAY_TOKEN",
+    )
+
+    assert "tools" not in generated
+
+
+@pytest.mark.parametrize("value", ["", "   ", 1, True, ["brave"], {"id": "brave"}])
+def test_openclaw_rejects_invalid_web_search_provider(
+    mock_openclaw: Path, tmp_path: Path, value: object
+):
+    config = _config(mock_openclaw)
+    assert config.harness is not None
+    config.harness.settings["web_search_provider"] = value
+
+    with pytest.raises(adapter.lifecycle.LifecycleError) as caught:
+        adapter._openclaw_config(
+            config,
+            _context(tmp_path),
+            base_dir=tmp_path,
+            port=20_000,
+            token_env="OPENCLAW_GATEWAY_TOKEN",
+        )
+
+    assert caught.value.code == "openclaw_invalid_configuration"
+    assert caught.value.metadata == {"field": "harness.settings.web_search_provider"}
+
+
+def test_openclaw_loads_configured_plugin_paths(tmp_path: Path):
+    (tmp_path / "plugins" / "brave").mkdir(parents=True)
+    absolute = tmp_path / "extensions"
+    absolute.mkdir()
+    config = AgentConfig.from_mapping(
+        {
+            "harness": {
+                "settings": {
+                    "plugin_paths": ["plugins/brave", str(absolute)],
+                    "web_search_provider": "brave",
+                }
+            },
+            "models": {"default": {"provider": "test", "model": "fabric-echo"}},
+        }
+    )
+
+    generated = adapter._openclaw_config(
+        config,
+        _context(tmp_path),
+        base_dir=tmp_path,
+        port=20_000,
+        token_env="OPENCLAW_GATEWAY_TOKEN",
+    )
+
+    assert generated["plugins"] == {
+        "load": {
+            "paths": [
+                str((tmp_path / "plugins" / "brave").resolve()),
+                str(absolute.resolve()),
+            ]
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("value", "code", "field"),
+    [
+        ("plugins", "openclaw_invalid_configuration", "harness.settings.plugin_paths"),
+        (
+            [""],
+            "openclaw_invalid_configuration",
+            "harness.settings.plugin_paths[0]",
+        ),
+        (
+            ["missing"],
+            "openclaw_plugin_path_not_found",
+            "harness.settings.plugin_paths[0]",
+        ),
+        (
+            ["plugin.json"],
+            "openclaw_plugin_path_not_found",
+            "harness.settings.plugin_paths[0]",
+        ),
+    ],
+)
+def test_openclaw_rejects_invalid_plugin_paths(
+    tmp_path: Path, value: object, code: str, field: str
+):
+    (tmp_path / "plugin.json").write_text("{}", encoding="utf-8")
+    config = AgentConfig.from_mapping(
+        {
+            "harness": {"settings": {"plugin_paths": value}},
+            "models": {"default": {"provider": "test", "model": "fabric-echo"}},
+        }
+    )
+
+    with pytest.raises(adapter.lifecycle.LifecycleError) as caught:
+        adapter._openclaw_config(
+            config,
+            _context(tmp_path),
+            base_dir=tmp_path,
+            port=20_000,
+            token_env="OPENCLAW_GATEWAY_TOKEN",
+        )
+
+    assert caught.value.code == code
+    assert caught.value.metadata == {"field": field}
+
+
 def test_openclaw_uses_provider_local_model_id(tmp_path: Path):
     config = AgentConfig.from_mapping(
         {
@@ -669,6 +828,8 @@ def test_openclaw_attach_rejects_deployment_owned_configuration(
             }
         ],
     }
+    config.harness.settings["web_search_provider"] = "brave"
+    config.harness.settings["plugin_paths"] = ["plugins"]
 
     with pytest.raises(adapter.lifecycle.LifecycleError) as caught:
         adapter._validate_attach_config(config)
@@ -681,6 +842,8 @@ def test_openclaw_attach_rejects_deployment_owned_configuration(
         "skills",
         "harness.settings.openclaw_command",
         "harness.settings.channel_config",
+        "harness.settings.web_search_provider",
+        "harness.settings.plugin_paths",
     }
 
 
@@ -1612,6 +1775,17 @@ def test_openclaw_descriptor_and_module_entrypoint(repo_root: Path):
     assert "agent_runtime" not in descriptor["settings_schema"]["properties"]
     assert "telegram" not in descriptor["settings_schema"]["properties"]
     assert "channel_config" in descriptor["settings_schema"]["properties"]
+    assert descriptor["settings_schema"]["properties"]["web_search_provider"] == {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S",
+        "description": (
+            "OpenClaw web search provider ID, such as brave or tavily. OpenClaw "
+            "enables the plugin that provides it. Make the plugin loadable, for "
+            "example through plugin_paths; it reads its API key from the "
+            "environment."
+        ),
+    }
     assert "tools.enabled" in descriptor["config"]["accepts"]
     assert "tools.blocked" in descriptor["config"]["accepts"]
     assert "mcp.auth.oauth2" not in descriptor["config"]["accepts"]
