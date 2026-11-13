@@ -14,6 +14,8 @@ navigation:
   contents:
   - page: Install
     path: ../pages-dev/getting-started/install.mdx
+  - page: Artifacts
+    path: ../pages-dev/getting-started/artifacts.mdx
   - page: Quickstart
     path: ../pages-dev/getting-started/quickstart.mdx
 - section: Experimentation
@@ -24,6 +26,10 @@ navigation:
   contents:
   - page: Python SDK
     path: ../pages-dev/sdk/python.mdx
+  - page: Health Checks
+    path: ../pages-dev/sdk/health-checks.mdx
+  - page: Resource Usage and Stats
+    path: ../pages-dev/sdk/system-stats.mdx
 - section: Adapter Contract
   contents:
   - page: Overview
@@ -69,15 +75,35 @@ navigation:
     - page: Factory Droid
       path: ../pages-dev/integrations/harness/droid.mdx
     - page: Hermes Agent
-      path: ../pages-dev/integrations/harness/hermes.mdx
+      path: ../pages-dev/integrations/harness/hermes/hermes.mdx
+    - page: Hermes SDK
+      path: ../pages-dev/integrations/harness/hermes/hermes-sdk.mdx
+    - page: Hermes API
+      path: ../pages-dev/integrations/harness/hermes/hermes-api.mdx
+    - page: Hermes Dashboard
+      path: ../pages-dev/integrations/harness/hermes/hermes-dashboard.mdx
+    - page: Hermes Terminal TUI
+      path: ../pages-dev/integrations/harness/hermes/hermes-tui.mdx
     - page: LangChain Deep Agents
       path: ../pages-dev/integrations/harness/deepagents.mdx
     - page: Kilo Code
       path: ../pages-dev/integrations/harness/kilo.mdx
+    - page: Kiro
+      path: ../pages-dev/integrations/harness/kiro.mdx
+    - page: AWS Strands
+      path: ../pages-dev/integrations/harness/strands.mdx
     - page: mini-SWE-agent
       path: ../pages-dev/integrations/harness/mini-swe-agent.mdx
     - page: OpenClaw
-      path: ../pages-dev/integrations/harness/openclaw.mdx
+      path: ../pages-dev/integrations/harness/openclaw/openclaw.mdx
+    - page: OpenClaw SDK
+      path: ../pages-dev/integrations/harness/openclaw/openclaw-sdk.mdx
+    - page: OpenClaw HTTP API
+      path: ../pages-dev/integrations/harness/openclaw/openclaw-api.mdx
+    - page: OpenClaw Dashboard
+      path: ../pages-dev/integrations/harness/openclaw/openclaw-dashboard.mdx
+    - page: OpenClaw Terminal TUI
+      path: ../pages-dev/integrations/harness/openclaw/openclaw-tui.mdx
     - page: OpenHands
       path: ../pages-dev/integrations/harness/openhands.mdx
     - page: OpenCode
@@ -100,6 +126,8 @@ navigation:
         path: ../pages-dev/reference/api/python-library-reference/nemo_fabric.client.md
       - page: Adapter Capability Inspection
         path: ../pages-dev/reference/api/python-library-reference/nemo_fabric.capabilities.md
+      - page: Runtime Health
+        path: ../pages-dev/reference/api/python-library-reference/nemo_fabric.check.md
       - page: Runtime
         path: ../pages-dev/reference/api/python-library-reference/nemo_fabric.runtime.md
       - page: Service

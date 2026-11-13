@@ -91,6 +91,18 @@ The adapter passes these fields to LangChain only when configured, so omitted
 fields preserve the model provider's defaults. Planning rejects unknown
 top-level model fields and every key under `models.<role>.settings`.
 
+Set `harness.settings.reasoning_effort` to `none`, `minimal`, `low`, `medium`,
+`high`, or `xhigh` to pass a reasoning effort to `ChatOpenAI`. For example,
+`settings={"reasoning_effort": "none"}` disables reasoning on endpoints that
+support that value. This setting requires an OpenAI-compatible provider, and
+the endpoint must support the selected value. Omit the setting to preserve the
+model default. Subagents inherit the setting when they inherit the main model;
+a subagent with its own `model` override uses that model's defaults.
+
+MCP-reported tool errors (`ToolException`) and argument validation failures return error tool messages to the model rather than aborting the invocation. Local argument-validation feedback includes field paths and reasons, such as `command: Field required`, without dumping argument payloads. The model can then correct a call. The adapter does not automatically retry or replay commands, and other exceptions still propagate.
+
+The runtime starts even when some configured MCP servers are unavailable. A server that cannot be reached, or that does not list its tools within 60 seconds, is skipped, and the agent starts with the tools of the remaining servers. Each result from that runtime lists the skipped servers under `output.mcp.unavailable_servers`, with the server `name`, `transport`, `reason` (`failed` or `timed_out`) and `error_type`. The adapter also writes a warning to standard error. Error messages are not reported, because they can contain URLs, headers or other credentials. Discovery runs again on every runtime start, so a new runtime picks up a server that has recovered. Invalid server configuration, such as an unsupported transport or authentication mode, still fails startup.
+
 Use normalized `FabricConfig` fields to configure the model, workspace, skills,
 MCP servers, replacement system instructions, blocked tools, and telemetry.
 The adapter rejects `append` system instructions. Use
@@ -184,12 +196,26 @@ provides only its fallback path. Configure the required variables explicitly and
 use absolute executable paths when needed. The `execute` tool remains subject
 to `tools.enabled` and `tools.blocked`, like all other Deep Agents built-ins.
 
-File tools and shell commands use different absolute-path namespaces when
-`virtual_mode=True`. For file tools, `/report.txt` resolves to
-`<workspace>/report.txt`; in `execute`, the same path refers to `/report.txt` on
-the adapter host. Shell commands start in `environment.workspace`, so use
-workspace-relative paths, such as `cat report.txt`, for files surfaced by file
-tools. Do not pass a file tool's virtual absolute path directly to `execute`.
+On POSIX, with `local_shell`, file tools accept absolute paths inside
+`environment.workspace` as aliases for workspace files. For example, with
+workspace `/app`, both file-tool paths `/app/report.txt` and `/report.txt` refer
+to `/app/report.txt` on disk. Shell commands use host paths and start in the
+workspace, so `cat report.txt` and `cat /app/report.txt` read that file.
+
+On POSIX, listings and searches return canonical physical paths inside the
+workspace. These paths identify the same file in subsequent reads and edits,
+even when a nested directory repeats the workspace prefix. For example, `/app/app/report.txt`
+remains distinct from `/app/report.txt`; the relative file-tool path
+`app/report.txt` also identifies the nested file.
+
+On Windows, listings and searches retain workspace-rooted virtual paths, such
+as `/nested/report.txt`. Use these paths with file tools; Deep Agents rejects
+drive-prefixed paths such as `C:/workspace/nested/report.txt` before backend
+resolution. Shell commands continue to use native host paths.
+
+File-tool traversal and symlink-escape checks remain enabled. Paths outside the
+workspace retain the existing virtual-root interpretation; they do not grant
+access to host files.
 
 `subagents` accepts declarative synchronous subagents and Agent Protocol
 asynchronous subagents. A declarative subagent requires `name`, `description`,
@@ -218,3 +244,9 @@ model provider configuration.
 For the complete configuration, subagent, lifecycle, and telemetry reference,
 refer to the
 [LangChain Deep Agents adapter guide](https://github.com/NVIDIA/NeMo-Fabric/tree/main/adapters/python/deepagents).
+
+## Runtime Health
+
+`Fabric.check()` supports `live`, `active`, and `ready`. The adapter checks the owned checkpoint connection, the compiled graph interface, and a fresh native state response for the selected thread.
+
+Refer to the [SDK health-check overview](../../sdk/health-checks.mdx) for shared behavior and a comparison of native evidence across adapters.

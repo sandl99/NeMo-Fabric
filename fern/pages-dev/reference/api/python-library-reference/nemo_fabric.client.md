@@ -21,6 +21,8 @@ Primary Python entrypoint for NeMo Fabric.
 
 Every config-dependent lifecycle method accepts a complete, typed ``FabricConfig`` plus an optional ``base_dir`` used to resolve relative paths. Compose variants in Python before calling the SDK. The ``doctor()``, ``plan()``, and ``run()`` results are typed, read-only mapping models. ``start_runtime()`` returns an active local ``Runtime`` handle. Explicit environment users call either ``prepare_environment()`` or ``attach_environment()``, then ``start_runtime_in()`` and ``release_environment()`` separately.
 
+Software capture is deferred until enabled initialization so configuration can disable all lookups. A new Fabric instance refreshes the SDK snapshot. Embedded guest servers label their own SDK observations ``guest_sdk``.
+
 ``Fabric`` uses the native Rust extension. SDK calls raise ``FabricNativeUnavailableError`` when the native extension is not installed.
 
 See the Getting Started overview for runnable single-invocation, typed-config, and multi-turn examples.
@@ -116,6 +118,45 @@ The adapter validates the reference against the normalized configuration and wri
  - <b>`FabricConfigError`</b>:  If the reference, plan, or adapter configuration  is invalid.
  - <b>`FabricNativeUnavailableError`</b>:  If the native extension is not  installed.
  - <b>`FabricRuntimeError`</b>:  If attachment or validation fails.
+
+---
+
+
+### <kbd>method</kbd> `check`
+
+```python
+async def check(
+    *,
+    request: CheckRequest,
+    environment: EnvironmentHandle | None = None,
+    service: ServiceHandle | None = None,
+) -> CheckReport
+```
+
+Check server, runtime, or service health.
+
+OpenShell checks execute ``fabric-agent-ctl check`` inside the selected sandbox. Runtime checks then use the local SDK and an independent adapter health channel. Local server checks return unsupported. The request's single deadline covers routing, all levels, and decoding. Timeouts return ``unknown`` with reason ``probe_timeout``. Service checks use the selected process-local ``ServiceHandle``.
+
+
+
+**Args:**
+
+ - <b>`environment`</b>:  Prepared or attached environment for server or runtime scope.
+ - <b>`service`</b>:  Prepared or attached service handle for service scope.
+ - <b>`request`</b>:  Typed scope, runtime or service target, highest level, and timeout.
+
+
+
+**Returns:**
+ An immutable ``CheckReport`` with ordered health observations.
+
+
+
+**Raises:**
+
+ - <b>`FabricConfigError`</b>:  If arguments or returned evidence are invalid.
+ - <b>`FabricNativeUnavailableError`</b>:  If the native extension is missing.
+ - <b>`FabricRuntimeError`</b>:  If transport fails before a report can be formed.
 
 ---
 
@@ -336,6 +377,48 @@ Execute one complete start, invoke, and stop lifecycle.
 ---
 
 
+### <kbd>method</kbd> `runtime_status`
+
+```python
+async def runtime_status(
+    *,
+    runtime_id: str,
+    agent_name: str,
+    environment: EnvironmentHandle | None = None,
+) -> RuntimeStatusReport
+```
+
+Read recorded runtime state and rediscover a safe handle by identifier.
+
+Without an environment, read runtimes created by this ``Fabric`` instance and retain each ``Runtime`` until successful stop. Each client holds at most 128 runtime records, including pending starts. New starts evict the oldest stopped records first and fail with ``runtime_limit_reached`` if active, failed, and pending runtimes fill the limit. A stopped record has a null handle. A local environment also selects its exact identifier.
+
+An OpenShell environment routes ``fabric-agent-ctl status`` to the owning server, including from a later client process. The returned handle belongs to that server's local environment. Records do not survive server restart. This operation never starts, invokes, stops, or probes a runtime. Recorded ``active`` state does not establish current harness health; use ``check()`` for a fresh observation.
+
+
+
+**Args:**
+
+ - <b>`runtime_id`</b>:  Runtime identifier returned by start.
+ - <b>`agent_name`</b>:  Exact owning agent name.
+ - <b>`environment`</b>:  Optional local selector or verified OpenShell binding.
+
+
+
+**Returns:**
+ An immutable ``RuntimeStatusReport`` with a discovery-only handle. Handle environment variables and arbitrary provider metadata are omitted.
+
+
+
+**Raises:**
+
+ - <b>`FabricConfigError`</b>:  If the target or returned report is invalid.
+ - <b>`FabricStateError`</b>:  If the runtime or selected ownership is unavailable.
+ - <b>`FabricNativeUnavailableError`</b>:  If remote routing needs a missing extension.
+ - <b>`FabricRuntimeError`</b>:  If the status transport fails.
+
+---
+
+
 ### <kbd>method</kbd> `start_runtime`
 
 ```python
@@ -379,6 +462,7 @@ Each call starts a new logical runtime. Runtime-scoped overrides are recursively
 **Raises:**
 
  - <b>`FabricConfigError`</b>:  If inputs or overrides are invalid, streaming is  requested without NeMo Relay enabled, ``launch_collector`` is  set without streaming, Pi is configured with an external  collector, or an external collector has no sink.
+ - <b>`FabricStateError`</b>:  If active, failed, and pending runtimes fill the  client's 128-record limit (``runtime_limit_reached``).
  - <b>`FabricNativeUnavailableError`</b>:  If the native extension is not  installed.
  - <b>`FabricRuntimeError`</b>:  If runtime startup fails.
 
@@ -422,6 +506,7 @@ Starting or stopping the runtime does not release ``environment``. Runtime and r
 **Raises:**
 
  - <b>`FabricConfigError`</b>:  If inputs are invalid or the handle does not match the plan.
+ - <b>`FabricStateError`</b>:  If active, failed, and pending runtimes fill the  client's 128-record limit (``runtime_limit_reached``).
  - <b>`FabricNativeUnavailableError`</b>:  If the native extension is not installed.
  - <b>`FabricRuntimeError`</b>:  If runtime startup fails.
 
