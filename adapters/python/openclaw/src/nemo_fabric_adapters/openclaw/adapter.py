@@ -1674,6 +1674,11 @@ class OpenClawRuntime:
         gateway_url, token, agent_id = _read_service_connection(
             Path(service["connection_path"])
         )
+        if settings.get("agent_id") is not None and agent_id != _agent_id(settings):
+            raise lifecycle.LifecycleError(
+                "openclaw_invalid_service_reference",
+                "OpenClaw service reference agent_id conflicts with harness.settings.agent_id",
+            )
         client = self._client_for(settings, token)
         try:
             await self._probe_gateway(client, gateway_url, agent_id)
@@ -2103,8 +2108,20 @@ class OpenClawRuntime:
         finally:
             if native_session and turn_started and not turn_finished:
                 native_session.recovery_required = True
+        recovery_error = (
+            contract.AgentRunError(
+                code="session_recovery_required",
+                message="Native turn completion could not be confirmed. Inspect native and external state before explicitly continuing.",
+                retryable=False,
+            )
+            if native_session and not turn_finished
+            else None
+        )
         return contract.AgentRunResult(
-            status=contract.AgentRunStatus.SUCCEEDED,
+            status=contract.AgentRunStatus.FAILED
+            if recovery_error
+            else contract.AgentRunStatus.SUCCEEDED,
+            error=recovery_error,
             output={
                 "response": text,
                 **await self._mcp_output(context.runtime_id, deadline),
