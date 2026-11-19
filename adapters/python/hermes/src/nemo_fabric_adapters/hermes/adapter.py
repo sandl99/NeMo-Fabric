@@ -237,6 +237,17 @@ class HermesRuntime:
                 telemetry.validate_hermes_relay_compatibility()
             self._agent_config = agent_config
             self._settings = configuration._settings(agent_config)
+            if (
+                self._settings.get("platforms", {})
+                .get("discord", {})
+                .get("enabled", False)
+            ):
+                raise lifecycle.LifecycleError(
+                    "hermes_discord_activation_unsupported",
+                    "Discord configuration is supported, but managed Discord gateway "
+                    "activation is not implemented; set platforms.discord.enabled to false",
+                    metadata={"field": "harness.settings.platforms.discord.enabled"},
+                )
             interface_ports = interfaces.interface_ports(self._settings)
             self._sdk_enabled = self._settings.get("sdk", {}).get("enabled", True)
             if runtime_context.session_ref is not None and not self._sdk_enabled:
@@ -457,7 +468,10 @@ class HermesRuntime:
                     # This gateway serves the managed API, not ambient chat bots.
                     # Explicit disables beat Hermes's credential-based enablement.
                     self._hermes_config["platforms"] = {
-                        name: {"enabled": False}
+                        name: {
+                            **self._hermes_config.get("platforms", {}).get(name, {}),
+                            "enabled": False,
+                        }
                         for name in platform_ids(self._hermes_home)
                         if name != "api_server"
                     }

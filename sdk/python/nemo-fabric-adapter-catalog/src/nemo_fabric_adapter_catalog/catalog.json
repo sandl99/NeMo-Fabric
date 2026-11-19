@@ -1069,6 +1069,53 @@
               "minimum": 1,
               "type": "integer"
             },
+            "platforms": {
+              "additionalProperties": false,
+              "description": "Messaging platform configuration; only Discord is currently declared. Activation remains unsupported.",
+              "properties": {
+                "discord": {
+                  "additionalProperties": false,
+                  "description": "Hermes-native Discord configuration. Does not install dependencies, grant network access, or start a Discord gateway.",
+                  "properties": {
+                    "allowed_channels": {
+                      "description": "Discord channel IDs passed to the native platform's allowed_channels setting.",
+                      "items": {
+                        "pattern": "^[1-9][0-9]{0,19}$",
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "allowed_users": {
+                      "description": "Discord user IDs passed to the native platform's allowed_users setting.",
+                      "items": {
+                        "pattern": "^[1-9][0-9]{0,19}$",
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "enabled": {
+                      "default": false,
+                      "description": "Requested Discord activation. Configuration can be planned, but runtime start rejects true until managed messaging lifecycle support is available.",
+                      "type": "boolean"
+                    },
+                    "require_mention": {
+                      "description": "Whether server-channel messages must mention the bot; omission preserves Hermes's native default.",
+                      "type": "boolean"
+                    },
+                    "token_env": {
+                      "description": "Environment variable holding the bot token or gateway placeholder. Written as a native ${VAR} reference, never resolved by the adapter. Omit to retain Hermes's DISCORD_BOT_TOKEN convention.",
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
             "plugins": {
               "additionalProperties": false,
               "description": "Hermes plugins, translated to Hermes's native plugins section in config.yaml. A plugin id may appear in only one section. The other fields are Hermes's own plugin controls and are written as they are. Plugins the agent installs itself are not supported.",
@@ -1323,7 +1370,7 @@
         "name": "nemo-fabric-adapters-hermes",
         "version": "0.8.0"
       },
-      "sha256": "3873209d1c07c9047400f5eaeba7dd974f0ec398c55cd3cd5321239fe25fc776",
+      "sha256": "2c2cb96ee69a9231508c3a14fe668c0c8428b4a2d1c75c7d595ec92b7765d424",
       "source": "adapters/python/hermes/hermes.fabric-adapter.json"
     },
     "nvidia.fabric.kilo": {

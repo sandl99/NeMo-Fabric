@@ -151,6 +151,29 @@ The adapter writes only the fields you set into `config.yaml` before the SDK age
 - **Tool selection:** `harness.settings.tools` is Hermes's native tools section. It is separate from NeMo Fabric's normalized top-level `tools.enabled` and `tools.blocked` selectors, which still choose the Hermes toolsets.
 - **Scope:** These controls reduce automatic background model calls; they do not stop context compaction calls. They configure every conversation in the runtime the same way and do not correlate concurrent sessions, so a consumer that tracks only the latest model request must use one session at a time.
 
+### Discord Configuration
+
+The adapter accepts a closed Discord configuration under `harness.settings.platforms.discord`:
+
+```yaml
+harness:
+  adapter_id: nvidia.fabric.hermes
+  settings:
+    platforms:
+      discord:
+        enabled: false
+        token_env: DISCORD_BOT_TOKEN
+        allowed_users: ["123456789012345678"]
+        allowed_channels: ["234567890123456789"]
+        require_mention: true
+```
+
+This configures the native platform; it does not activate messaging. `enabled` defaults to `false`. Planning accepts `true`, but runtime start rejects it with `hermes_discord_activation_unsupported` before creating native state. The managed API gateway still disables Discord, and the SDK path does not start a Discord gateway. Plugin enablement does not override this restriction.
+
+`token_env` names an environment variable holding the token or credential-provider placeholder. The adapter writes a `${VAR}` reference into Hermes's configuration without reading the value. Omission retains Hermes's native `DISCORD_BOT_TOKEN` convention. Keep raw tokens out of configuration and run plans. The user and channel lists accept nonzero decimal ID strings of at most 20 digits; inline `token`, wildcard IDs, other platforms, and unknown fields are rejected. Allowlists and `require_mention` map to the native platform's `extra` section. Omitted fields retain Hermes's defaults; empty lists do not establish deny-all authorization.
+
+The operator still supplies compatible Discord client dependencies, credential delivery, outbound REST/WebSocket policy, and Discord application permissions. None are provisioned by this setting. Managed channel startup, authentication readiness, reconnect behavior, and shutdown remain future work.
+
 ### Skills
 
 [Configure Skills](../skills.mdx) describes the `skills` fields, the common setups, the start checks, and the run report. Its [Harness Differences](../skills.mdx#harness-differences) table compares Hermes Agent with OpenClaw. This section covers the rest of Hermes's behavior.

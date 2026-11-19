@@ -27,6 +27,8 @@ Invocation response and artifact budgets are configured under
 [`runtime.response_limits`](docs/sdk/python.mdx#response-and-artifact-limits),
 with the same policy for host and OpenShell execution.
 
+The Hermes adapter accepts [Discord configuration](adapters/python/hermes/README.md#discord-configuration); managed Discord activation remains unsupported.
+
 ## Supported Agent Harnesses
 
 NeMo Fabric includes adapters for the following harnesses and execution targets. Select a harness name for its adapter documentation:

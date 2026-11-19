@@ -72,6 +72,7 @@ runtime assumptions but never installs harnesses or credentials at run time.
 - Provide model credentials through environment variables named by the config
   (`ModelConfig.api_key_env`), never as literals in code.
 - Forward other existing variables with `EnvironmentConfig.env_names`; only names are stored in configuration and run plans. `EnvironmentConfig.env` supplies literal values and does not expand `$NAME` references. Neither field loads a `.env` file.
+- Hermes accepts Discord configuration in `harness.settings.platforms.discord`, including `token_env` credential references. This does not activate messaging: runtime start rejects `enabled: true` with `hermes_discord_activation_unsupported`. See the [Hermes adapter guide](https://github.com/NVIDIA/NeMo-Fabric/blob/main/adapters/python/hermes/README.md#discord-configuration). Plugin enablement alone does not start a channel.
 - Keep named environment values unchanged while a runtime or service is active. NeMo Fabric rejects changed or unset values before invocation; restart the runtime and any associated service after changing them. With Harbor, deliver values into the task environment through Harbor's managed environment first.
 - Confirm the native extension is importable; SDK calls raise
   `FabricNativeUnavailableError` when it is missing.

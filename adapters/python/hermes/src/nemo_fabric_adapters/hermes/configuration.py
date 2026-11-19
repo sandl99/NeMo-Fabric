@@ -231,6 +231,20 @@ def build_hermes_config(
     if plugins:
         config["plugins"] = plugins
 
+    discord = settings.get("platforms", {}).get("discord")
+    if discord is not None:
+        platform: dict[str, Any] = {"enabled": discord.get("enabled", False)}
+        if "token_env" in discord:
+            platform["token"] = f"${{{discord['token_env']}}}"
+        extra = {
+            name: discord[name]
+            for name in ("allowed_users", "allowed_channels", "require_mention")
+            if name in discord
+        }
+        if extra:
+            platform["extra"] = extra
+        config["platforms"] = {"discord": platform}
+
     return config
 
 

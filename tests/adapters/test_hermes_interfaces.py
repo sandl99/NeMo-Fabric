@@ -226,19 +226,29 @@ async def test_managed_api_does_not_enable_inherited_messaging_platforms(
     os.environ["TELEGRAM_BOT_TOKEN"] = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi"
     os.environ["WEBHOOK_ENABLED"] = "true"
     os.environ["HERMES_DISABLE_LAZY_INSTALLS"] = "1"
+    os.environ["FABRIC_DISCORD_TOKEN"] = "test-discord-token"
     port = _free_port()
+    settings = _interface("api", port=port)
+    settings["platforms"] = {
+        "discord": {
+            "enabled": False,
+            "token_env": "FABRIC_DISCORD_TOKEN",
+            "allowed_users": ["123456789012345678"],
+        }
+    }
     runtime = adapter.HermesRuntime()
     try:
-        await runtime.start(
-            _payload(
-                tmp_path, _interface("api", port=port), base_url=f"{api_server}/v1"
-            )
-        )
+        await runtime.start(_payload(tmp_path, settings, base_url=f"{api_server}/v1"))
         from gateway.config import Platform, load_gateway_config
 
         config = load_gateway_config()
         assert config.platforms[Platform.TELEGRAM].enabled is False
         assert config.platforms[Platform.WEBHOOK].enabled is False
+        assert config.platforms[Platform.DISCORD].enabled is False
+        assert config.platforms[Platform.DISCORD].token == "test-discord-token"
+        assert config.platforms[Platform.DISCORD].extra["allowed_users"] == [
+            "123456789012345678"
+        ]
         assert config.multiplex_profiles is False
         # Only the child receives API_SERVER_KEY; no other platform may connect.
         assert set(config.get_connected_platforms()) <= {Platform.API_SERVER}

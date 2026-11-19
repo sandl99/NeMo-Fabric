@@ -134,6 +134,7 @@ The descriptor validates the following `harness.settings` fields:
 | `reasoning_config` | object | `{"effort": "none"}` | Configures Hermes model reasoning. The closed object accepts an optional `enabled` boolean and an optional `effort` value of `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
 | `plugins` | object | None | Plugins by source, `bundled.entries` and `external` (`paths`, `entries`), each entry with `enabled`, `config`, and `capabilities`, plus Hermes's own plugin controls. Start fails when an enabled plugin didn't load. Refer to [Plugins](../../../docs/integrations/harness/hermes/hermes.mdx#plugins). Configure NeMo Relay through NeMo Fabric telemetry settings. |
 | `plugins_enabled` | array of nonempty strings | `[]` | Native Hermes plugin identifiers to enable. |
+| `platforms.discord` | object | None | Discord configuration and a token environment reference. Configuration only: runtime start rejects `enabled: true` until managed messaging activation is implemented. |
 | `save_trajectories` | boolean | `false` | Enables Hermes-native JSONL conversation trajectory saving. This is separate from normalized NeMo Fabric telemetry. |
 | `max_tokens` | positive integer | Hermes native default | Used when the selected model has no explicit `max_tokens`. A model-level limit takes precedence; if both are omitted, Hermes uses its native default. |
 | `terminal_timeout` | positive number | `60` | Limits a Hermes terminal tool operation in seconds; it does not enable a TUI. |
@@ -199,6 +200,27 @@ differs from other harnesses. The
 [Hermes guide](../../../docs/integrations/harness/hermes/hermes.mdx#skills)
 covers Hermes's skip reasons, agent-written skills, and bundled-skill
 handling.
+
+## Discord Configuration
+
+Declare Discord settings under `harness.settings.platforms.discord`. This surface accepts configuration without installing a client library, registering credentials, granting network access, or starting a Discord connection:
+
+```yaml
+harness:
+  adapter_id: nvidia.fabric.hermes
+  settings:
+    platforms:
+      discord:
+        enabled: false
+        token_env: DISCORD_BOT_TOKEN
+        allowed_users: ["123456789012345678"]
+        allowed_channels: ["234567890123456789"]
+        require_mention: true
+```
+
+`enabled` defaults to `false`. The adapter writes `token_env` as the native token reference `${DISCORD_BOT_TOKEN}` without reading or copying its value. If `token_env` is omitted, Hermes retains its native `DISCORD_BOT_TOKEN` convention. Supply credentials through the deployment environment or its credential provider; do not put token values in settings. User and channel IDs must be nonzero decimal strings of at most 20 digits; wildcard entries and inline `token` fields are rejected. The allowlists and mention setting map to the native platform's `extra` section. Omitted access settings retain Hermes's behavior; an empty list must not be treated as a promise to deny every sender.
+
+Planning accepts `enabled: true` as configuration intent, but runtime start fails with `hermes_discord_activation_unsupported` before creating native state. The current managed API gateway disables messaging platforms, and SDK execution alone does not start a messaging gateway. Enabling `discord-platform` as a plugin does not change that lifecycle. Use `enabled: false` while preparing configuration; bot authentication, receiving messages, and reply delivery are not supported by this configuration-only surface.
 
 ## Configuration Mapping and Ownership
 

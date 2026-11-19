@@ -10,6 +10,53 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
+      "platforms": {
+        "type": "object",
+        "properties": {
+          "discord": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false,
+                "description": "Requested Discord activation. Configuration can be planned, but runtime start rejects true until managed messaging lifecycle support is available."
+              },
+              "token_env": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "maxLength": 128,
+                "description": "Environment variable holding the bot token or gateway placeholder. Written as a native ${VAR} reference, never resolved by the adapter. Omit to retain Hermes's DISCORD_BOT_TOKEN convention."
+              },
+              "allowed_users": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,19}$"
+                },
+                "uniqueItems": true,
+                "description": "Discord user IDs passed to the native platform's allowed_users setting."
+              },
+              "allowed_channels": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,19}$"
+                },
+                "uniqueItems": true,
+                "description": "Discord channel IDs passed to the native platform's allowed_channels setting."
+              },
+              "require_mention": {
+                "type": "boolean",
+                "description": "Whether server-channel messages must mention the bot; omission preserves Hermes's native default."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Hermes-native Discord configuration. Does not install dependencies, grant network access, or start a Discord gateway."
+          }
+        },
+        "additionalProperties": false,
+        "description": "Messaging platform configuration; only Discord is currently declared. Activation remains unsupported."
+      },
       "reasoning_config": {
         "type": "object",
         "properties": {
