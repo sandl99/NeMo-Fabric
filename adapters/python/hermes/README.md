@@ -134,7 +134,7 @@ The descriptor validates the following `harness.settings` fields:
 | `reasoning_config` | object | `{"effort": "none"}` | Configures Hermes model reasoning. The closed object accepts an optional `enabled` boolean and an optional `effort` value of `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
 | `plugins` | object | None | Plugins by source, `bundled.entries` and `external` (`paths`, `entries`), each entry with `enabled`, `config`, and `capabilities`, plus Hermes's own plugin controls. Start fails when an enabled plugin didn't load. Refer to [Plugins](../../../docs/integrations/harness/hermes/hermes.mdx#plugins). Configure NeMo Relay through NeMo Fabric telemetry settings. |
 | `plugins_enabled` | array of nonempty strings | `[]` | Native Hermes plugin identifiers to enable. |
-| `platforms.discord` | object | None | Discord configuration and a token environment reference. Configuration only: runtime start rejects `enabled: true` until managed messaging activation is implemented. |
+| `platforms.discord` | object | None | Discord selection, token environment reference, allowlists, and mention behavior. The runtime starts its existing Hermes gateway when Discord is enabled; no API interface is required. |
 | `save_trajectories` | boolean | `false` | Enables Hermes-native JSONL conversation trajectory saving. This is separate from normalized NeMo Fabric telemetry. |
 | `max_tokens` | positive integer | Hermes native default | Used when the selected model has no explicit `max_tokens`. A model-level limit takes precedence; if both are omitted, Hermes uses its native default. |
 | `terminal_timeout` | positive number | `60` | Limits a Hermes terminal tool operation in seconds; it does not enable a TUI. |
@@ -203,24 +203,31 @@ handling.
 
 ## Discord Configuration
 
-Declare Discord settings under `harness.settings.platforms.discord`. This surface accepts configuration without installing a client library, registering credentials, granting network access, or starting a Discord connection:
+Set `harness.settings.platforms.discord.enabled: true` to run Discord on the runtime-owned Hermes gateway. With `interfaces.api`, the same gateway serves the API and Discord. Without it, the gateway starts for Discord alone, without an API listener or API token:
 
 ```yaml
+environment:
+  provider: local
+  env_names: [DISCORD_BOT_TOKEN]
 harness:
   adapter_id: nvidia.fabric.hermes
   settings:
     platforms:
       discord:
-        enabled: false
+        enabled: true
         token_env: DISCORD_BOT_TOKEN
         allowed_users: ["123456789012345678"]
         allowed_channels: ["234567890123456789"]
         require_mention: true
 ```
 
-`enabled` defaults to `false`. The adapter writes `token_env` as the native token reference `${DISCORD_BOT_TOKEN}` without reading or copying its value. If `token_env` is omitted, Hermes retains its native `DISCORD_BOT_TOKEN` convention. Supply credentials through the deployment environment or its credential provider; do not put token values in settings. User and channel IDs must be nonzero decimal strings of at most 20 digits; wildcard entries and inline `token` fields are rejected. The allowlists and mention setting map to the native platform's `extra` section. Omitted access settings retain Hermes's behavior; an empty list must not be treated as a promise to deny every sender.
+`enabled` defaults to `false`. The adapter checks that the selected credential variable is nonempty and `discord.py` is available before creating native state. It writes `token_env` as the native token reference `${DISCORD_BOT_TOKEN}` without copying its value into configuration. If `token_env` is omitted, Hermes retains its native `DISCORD_BOT_TOKEN` convention. Supply the credential through `environment.env_names` or the deployment's credential provider; do not put token values in settings. User and channel IDs must be nonzero decimal strings of at most 20 digits; wildcard entries and inline `token` fields are rejected. Allowlists and mention settings map to the native platform's `extra` section. Omitted access settings retain Hermes's behavior; empty lists do not establish deny-all authorization.
 
-Planning accepts `enabled: true` as configuration intent, but runtime start fails with `hermes_discord_activation_unsupported` before creating native state. The current managed API gateway disables messaging platforms, and SDK execution alone does not start a messaging gateway. Enabling `discord-platform` as a plugin does not change that lifecycle. Use `enabled: false` while preparing configuration; bot authentication, receiving messages, and reply delivery are not supported by this configuration-only surface.
+The operator installs the compatible Discord client dependencies, configures the Discord bot permissions and intents, and grants outbound REST/WebSocket access. Fabric does not install dependencies or provision credentials or network policy. Missing credentials fail with `hermes_discord_credential_missing`; a missing client library fails with `hermes_discord_dependency_missing`. Plugin enablement alone does not start a channel. Other messaging platforms remain explicitly disabled, even when their tokens are inherited.
+
+Startup uses the existing interface startup deadline and waits for the owned gateway's fresh native status to report Discord connected. An API health response alone does not establish Discord readiness. With Discord enabled, runtime `active` and `ready` checks include that native connection status even when the SDK is healthy; `live` checks process liveness. Hermes owns heartbeats and reconnects. Missing, stale, or foreign-process status cannot pass connection readiness. These checks do not prove message delivery or a model reply.
+
+Runtime stop uses the existing child-process cleanup for the shared gateway, including its bounded drain and process-group termination. In-flight Discord work can be interrupted. Discord conversations remain native Hermes conversations, separate from SDK invocations; retaining the Hermes home follows the existing `runtime.keep_state` and storage contract. Set `sdk.enabled: false` for Discord-only execution when SDK invocation is unnecessary.
 
 ## Configuration Mapping and Ownership
 

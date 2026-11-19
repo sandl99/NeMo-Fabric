@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import importlib.util
 import inspect
 import logging
 import os
@@ -237,17 +238,24 @@ class HermesRuntime:
                 telemetry.validate_hermes_relay_compatibility()
             self._agent_config = agent_config
             self._settings = configuration._settings(agent_config)
-            if (
-                self._settings.get("platforms", {})
-                .get("discord", {})
-                .get("enabled", False)
-            ):
-                raise lifecycle.LifecycleError(
-                    "hermes_discord_activation_unsupported",
-                    "Discord configuration is supported, but managed Discord gateway "
-                    "activation is not implemented; set platforms.discord.enabled to false",
-                    metadata={"field": "harness.settings.platforms.discord.enabled"},
+            discord = interfaces.discord_enabled(self._settings)
+            if discord:
+                token_env = self._settings["platforms"]["discord"].get(
+                    "token_env", "DISCORD_BOT_TOKEN"
                 )
+                if not os.environ.get(token_env):
+                    raise lifecycle.LifecycleError(
+                        "hermes_discord_credential_missing",
+                        f"Discord requires the credential environment variable {token_env}",
+                        metadata={
+                            "field": "harness.settings.platforms.discord.token_env"
+                        },
+                    )
+                if importlib.util.find_spec("discord") is None:
+                    raise lifecycle.LifecycleError(
+                        "hermes_discord_dependency_missing",
+                        "Discord requires discord.py in the Hermes interpreter environment",
+                    )
             interface_ports = interfaces.interface_ports(self._settings)
             self._sdk_enabled = self._settings.get("sdk", {}).get("enabled", True)
             if runtime_context.session_ref is not None and not self._sdk_enabled:
@@ -255,10 +263,10 @@ class HermesRuntime:
                     "session_resume_unsupported",
                     "SessionRef resume requires the Hermes SDK backend",
                 )
-            if not self._sdk_enabled and not interface_ports:
+            if not self._sdk_enabled and not interface_ports and not discord:
                 raise lifecycle.LifecycleError(
                     "hermes_no_execution_path",
-                    "Enable the Hermes SDK or at least one native interface",
+                    "Enable the Hermes SDK, a native interface, or Discord",
                 )
             model_config = configuration._selected_model(agent_config)
             self._model_config = model_config
@@ -281,7 +289,7 @@ class HermesRuntime:
                     "hermes_interface_cleanup_failed",
                     "Hermes interface files could not be removed",
                 ) from error
-            if interface_ports:
+            if interface_ports or discord:
                 # Refuse before Hermes's setup, whose MCP discovery can take
                 # minutes and outlast the caller's start deadline.
                 interfaces.require_supported_platform()
@@ -371,8 +379,8 @@ class HermesRuntime:
                 # environment below, so their own sync reads the same folder.
                 if skill_plan.excluded_bundled:
                     await self._stage_bundled_skills(skill_plan)
-                if interface_ports:
-                    # Each interface process runs Hermes's bundled sync at
+                if interface_ports or discord:
+                    # Each native process runs Hermes's bundled sync at
                     # start, after this report. Run the same sync first, so
                     # the report observes what the interfaces load; their
                     # sync then finds nothing to copy.
@@ -461,16 +469,16 @@ class HermesRuntime:
                 with redirect_stdout(StringIO()):
                     discover_plugins(force=True)
                 plugins.check_loaded_plugins(self._settings)
-            if interface_ports:
-                if "api" in interface_ports:
+            if interface_ports or discord:
+                if "api" in interface_ports or discord:
                     from hermes_cli.profile_channels import platform_ids
 
-                    # This gateway serves the managed API, not ambient chat bots.
+                    # Only explicitly selected messaging may share the managed gateway.
                     # Explicit disables beat Hermes's credential-based enablement.
                     self._hermes_config["platforms"] = {
                         name: {
                             **self._hermes_config.get("platforms", {}).get(name, {}),
-                            "enabled": False,
+                            "enabled": discord and name == "discord",
                         }
                         for name in platform_ids(self._hermes_home)
                         if name != "api_server"
@@ -977,15 +985,19 @@ class HermesRuntime:
     async def check(self, level: str) -> dict[str, Any]:
         """Observe SDK health when enabled, otherwise the native backends."""
         if (
-            self._sdk_enabled
+            (self._sdk_enabled and not interfaces.discord_enabled(self._settings))
             or not self._started
             or self._stopping
             or level not in {"live", "active", "ready"}
         ):
             return await self._check_sdk(level)
         ports = interfaces.interface_ports(self._settings)
-        if not ports:
+        if not ports and not interfaces.discord_enabled(self._settings):
             return await self._check_sdk(level)
+        if self._sdk_enabled:
+            sdk = await self._check_sdk(level)
+            if sdk["outcome"] != "passed":
+                return sdk
         reason = await self._interfaces.check(level)
         if self._stopping or not self._started:
             reason = "observation_changed"

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Own Hermes API and shared browser/terminal TUI backend processes."""
+"""Own Hermes gateway and shared browser/terminal TUI backend processes."""
 
 from __future__ import annotations
 
@@ -58,6 +58,11 @@ def interface_ports(settings: dict[str, Any]) -> dict[str, int]:
     return ports
 
 
+def discord_enabled(settings: dict[str, Any]) -> bool:
+    """Whether the runtime explicitly selects the Discord platform."""
+    return settings.get("platforms", {}).get("discord", {}).get("enabled", False)
+
+
 def startup_timeout(settings: dict[str, Any]) -> float:
     """Return the deadline for every enabled interface to pass its health check."""
     return float(
@@ -78,9 +83,10 @@ def require_supported_platform() -> None:
 @dataclass
 class _Child:
     name: str
-    port: int
+    port: int | None
     process: asyncio.subprocess.Process
     tui_token: str | None = field(default=None, repr=False)
+    discord_status_path: Path | None = None
 
 
 class InterfaceChildren:
@@ -118,6 +124,12 @@ class InterfaceChildren:
                     },
                 )
         web_dist = _web_dist() if "dashboard" in ports else None
+        discord = discord_enabled(
+            agent_config.harness.settings if agent_config.harness else {}
+        )
+        backends: dict[str, int | None] = dict(ports)
+        if discord and "api" not in ports:
+            backends["gateway"] = None
         token = secrets.token_urlsafe(32)
         tui_token = secrets.token_urlsafe(32)
         log_dir = hermes_home / "logs"
@@ -141,7 +153,7 @@ class InterfaceChildren:
                 config_path, json.dumps(agent_config.to_mapping())
             )
             self._agent_config_path = config_path
-            for name, port in ports.items():
+            for name, port in backends.items():
                 arguments, child_environment = _child_command(
                     name,
                     port,
@@ -165,7 +177,15 @@ class InterfaceChildren:
                         pass_fds=inherited_lock,
                     )
                 self._children.append(
-                    _Child(name, port, process, tui_token if name != "api" else None)
+                    _Child(
+                        name,
+                        port,
+                        process,
+                        tui_token if name in {"dashboard", "terminal"} else None,
+                        hermes_home / "gateway_state.json"
+                        if discord and name in {"api", "gateway"}
+                        else None,
+                    )
                 )
             for child in self._children:
                 await _wait_healthy(child, deadline)
@@ -201,19 +221,8 @@ class InterfaceChildren:
         if not children:
             return "runtime_unavailable"
         for child in children:
-            if child.process.returncode is not None:
-                return "agent_exited"
-            if (
-                level != "live"
-                and await _http_status(child.port, HEALTH_PATHS[child.name]) != 200
-            ):
-                return "endpoint_unavailable"
-            if (
-                level != "live"
-                and child.tui_token
-                and not await tui_ready(child.port, child.tui_token)
-            ):
-                return "endpoint_unavailable"
+            if reason := await _child_reason(child, level):
+                return reason
         if children != tuple(self._children):
             return "observation_changed"
         return None
@@ -282,18 +291,20 @@ def _web_dist() -> Path:
 
 async def _wait_healthy(child: _Child, deadline: float) -> None:
     """Wait for native health and TUI authentication within the shared budget."""
-    loop = asyncio.get_running_loop()
-    while loop.time() < deadline:
-        if child.process.returncode is not None:
-            raise lifecycle.LifecycleError(
-                "hermes_interface_start_failed",
-                f"Hermes {child.name} exited before passing its health check",
-                metadata={"interface": child.name},
-            )
-        if await _http_status(child.port, HEALTH_PATHS[child.name]) == 200:
-            if not child.tui_token or await tui_ready(child.port, child.tui_token):
-                return
-        await asyncio.sleep(0.1)
+    try:
+        async with asyncio.timeout_at(deadline):
+            while True:
+                if child.process.returncode is not None:
+                    raise lifecycle.LifecycleError(
+                        "hermes_interface_start_failed",
+                        f"Hermes {child.name} exited before passing its health check",
+                        metadata={"interface": child.name},
+                    )
+                if await _child_reason(child, "ready") is None:
+                    return
+                await asyncio.sleep(0.1)
+    except TimeoutError:
+        pass
     raise lifecycle.LifecycleError(
         "hermes_interface_start_timeout",
         f"Hermes {child.name} didn't pass its health check before the startup timeout",
@@ -302,9 +313,58 @@ async def _wait_healthy(child: _Child, deadline: float) -> None:
     )
 
 
+async def _child_reason(child: _Child, level: str) -> str | None:
+    if child.process.returncode is not None:
+        return "agent_exited"
+    if level == "live":
+        return None
+    if child.port is not None:
+        if await _http_status(child.port, HEALTH_PATHS[child.name]) != 200:
+            return "endpoint_unavailable"
+        if child.tui_token and not await tui_ready(child.port, child.tui_token):
+            return "endpoint_unavailable"
+    if child.discord_status_path is not None:
+        return await asyncio.to_thread(_discord_reason, child)
+    return None
+
+
+def _discord_reason(child: _Child) -> str | None:
+    """Use the owned gateway's fresh native connection status, never its logs."""
+    from gateway.status import (
+        read_runtime_status,
+        runtime_status_is_stale,
+        runtime_status_pid_is_live,
+        start_time_fingerprints_match,
+    )
+
+    record = read_runtime_status(child.discord_status_path)
+    if (
+        record is None
+        or record.get("pid") != child.process.pid
+        or runtime_status_is_stale(record)
+        or not runtime_status_pid_is_live(record)
+        or record.get("gateway_state") != "running"
+    ):
+        return "endpoint_unavailable"
+    discord = record.get("platforms", {}).get("discord", {})
+    if (
+        discord.get("state") != "connected"
+        or discord.get("writer_pid") != child.process.pid
+    ):
+        return "endpoint_unavailable"
+    try:
+        if not start_time_fingerprints_match(
+            discord.get("writer_start_time"), record.get("start_time")
+        ):
+            return "endpoint_unavailable"
+    except (TypeError, ValueError):
+        return "endpoint_unavailable"
+    return None
+
+
 def _child_command(
     name: str,
-    port: int,
+    port: int | None,
     *,
     token: str,
     web_dist: Path | None,
@@ -324,12 +384,13 @@ def _child_command(
             "HERMES_SERVE_HEADLESS",
         }
     }
-    if name == "api":
-        child_environment.update(
-            API_SERVER_KEY=token,
-            API_SERVER_HOST="127.0.0.1",
-            API_SERVER_PORT=str(port),
-        )
+    if name in {"api", "gateway"}:
+        if name == "api":
+            child_environment.update(
+                API_SERVER_KEY=token,
+                API_SERVER_HOST="127.0.0.1",
+                API_SERVER_PORT=str(port),
+            )
         return ["gateway", "run"], child_environment
     child_environment["HERMES_DASHBOARD_SESSION_TOKEN"] = token
     if name == "terminal":

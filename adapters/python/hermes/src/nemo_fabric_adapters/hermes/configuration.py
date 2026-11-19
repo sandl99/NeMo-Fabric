@@ -190,7 +190,10 @@ def build_hermes_config(
         ),
     }
 
-    if interfaces:
+    discord_enabled = (
+        settings.get("platforms", {}).get("discord", {}).get("enabled", False)
+    )
+    if interfaces or discord_enabled:
         config["model"] = _interface_model(model_config)
         if model_config.base_url and config["model"].get("provider") == "custom":
             # Hermes ignores model.api_key for openrouter.ai and reads
@@ -201,7 +204,7 @@ def build_hermes_config(
                     "key_env": _api_key_env(model_config),
                 }
             }
-    if "api" in interfaces:
+    if "api" in interfaces or discord_enabled:
         config["agent"]["cron_drain_timeout"] = GATEWAY_DRAIN_TIMEOUT_SECONDS
         config["agent"]["restart_drain_timeout"] = 0
 

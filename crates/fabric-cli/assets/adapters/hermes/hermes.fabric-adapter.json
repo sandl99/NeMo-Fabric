@@ -19,7 +19,7 @@
               "enabled": {
                 "type": "boolean",
                 "default": false,
-                "description": "Requested Discord activation. Configuration can be planned, but runtime start rejects true until managed messaging lifecycle support is available."
+                "description": "Start Discord on the runtime-owned Hermes gateway; the API interface is optional."
               },
               "token_env": {
                 "type": "string",
@@ -51,11 +51,11 @@
               }
             },
             "additionalProperties": false,
-            "description": "Hermes-native Discord configuration. Does not install dependencies, grant network access, or start a Discord gateway."
+            "description": "Hermes-native Discord configuration. Activation uses the managed gateway and requires operator-provided credentials, dependencies, and network access."
           }
         },
         "additionalProperties": false,
-        "description": "Messaging platform configuration; only Discord is currently declared. Activation remains unsupported."
+        "description": "Messaging platforms explicitly selected for the runtime-owned Hermes gateway."
       },
       "reasoning_config": {
         "type": "object",
@@ -291,7 +291,7 @@
           "enabled": {
             "type": "boolean",
             "default": true,
-            "description": "Initialize the embedded SDK agent during startup. Disable for native-only execution; SDK invocation then fails explicitly."
+            "description": "Initialize the embedded SDK agent during startup. Disable with a native interface or explicitly enabled Discord; SDK invocation then fails explicitly."
           }
         },
         "additionalProperties": false,
@@ -373,6 +373,30 @@
               "properties": {
                 "enabled": {
                   "const": false
+                }
+              }
+            }
+          },
+          "not": {
+            "required": [
+              "platforms"
+            ],
+            "properties": {
+              "platforms": {
+                "required": [
+                  "discord"
+                ],
+                "properties": {
+                  "discord": {
+                    "required": [
+                      "enabled"
+                    ],
+                    "properties": {
+                      "enabled": {
+                        "const": true
+                      }
+                    }
+                  }
                 }
               }
             }

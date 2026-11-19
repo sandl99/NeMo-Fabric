@@ -96,6 +96,21 @@ async def test_mixed_runtime_health_uses_sdk_activity(hermes_health, level, busy
 
 
 @pytest.mark.parametrize("level", ["live", "active", "ready"])
+async def test_enabled_discord_gateway_failure_is_not_hidden_by_sdk_health(
+    hermes_health, level
+):
+    runtime, agent = hermes_health
+    runtime._settings = {"platforms": {"discord": {"enabled": True}}}
+    runtime._interfaces.check = AsyncMock(return_value="endpoint_unavailable")
+
+    result = await runtime.check(level)
+
+    assert result["outcome"] == "failed"
+    assert result["reason_code"] == "endpoint_unavailable"
+    runtime._interfaces.check.assert_awaited_once_with(level)
+
+
+@pytest.mark.parametrize("level", ["live", "active", "ready"])
 async def test_hermes_health_diagnostic_reply_does_not_hide_closure(
     hermes_health, level
 ):

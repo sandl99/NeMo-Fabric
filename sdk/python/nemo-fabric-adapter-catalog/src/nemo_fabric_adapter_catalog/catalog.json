@@ -894,6 +894,30 @@
           "allOf": [
             {
               "if": {
+                "not": {
+                  "properties": {
+                    "platforms": {
+                      "properties": {
+                        "discord": {
+                          "properties": {
+                            "enabled": {
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "enabled"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "discord"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "platforms"
+                  ]
+                },
                 "properties": {
                   "sdk": {
                     "properties": {
@@ -1071,11 +1095,11 @@
             },
             "platforms": {
               "additionalProperties": false,
-              "description": "Messaging platform configuration; only Discord is currently declared. Activation remains unsupported.",
+              "description": "Messaging platforms explicitly selected for the runtime-owned Hermes gateway.",
               "properties": {
                 "discord": {
                   "additionalProperties": false,
-                  "description": "Hermes-native Discord configuration. Does not install dependencies, grant network access, or start a Discord gateway.",
+                  "description": "Hermes-native Discord configuration. Activation uses the managed gateway and requires operator-provided credentials, dependencies, and network access.",
                   "properties": {
                     "allowed_channels": {
                       "description": "Discord channel IDs passed to the native platform's allowed_channels setting.",
@@ -1097,7 +1121,7 @@
                     },
                     "enabled": {
                       "default": false,
-                      "description": "Requested Discord activation. Configuration can be planned, but runtime start rejects true until managed messaging lifecycle support is available.",
+                      "description": "Start Discord on the runtime-owned Hermes gateway; the API interface is optional.",
                       "type": "boolean"
                     },
                     "require_mention": {
@@ -1263,7 +1287,7 @@
               "properties": {
                 "enabled": {
                   "default": true,
-                  "description": "Initialize the embedded SDK agent during startup. Disable for native-only execution; SDK invocation then fails explicitly.",
+                  "description": "Initialize the embedded SDK agent during startup. Disable with a native interface or explicitly enabled Discord; SDK invocation then fails explicitly.",
                   "type": "boolean"
                 }
               },
@@ -1370,7 +1394,7 @@
         "name": "nemo-fabric-adapters-hermes",
         "version": "0.8.0"
       },
-      "sha256": "2c2cb96ee69a9231508c3a14fe668c0c8428b4a2d1c75c7d595ec92b7765d424",
+      "sha256": "9e1df74cb5da0defb4b116df60200a4cd2568f33b818675bf1dd1b70c1be93d4",
       "source": "adapters/python/hermes/hermes.fabric-adapter.json"
     },
     "nvidia.fabric.kilo": {

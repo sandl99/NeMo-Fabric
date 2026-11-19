@@ -153,26 +153,33 @@ The adapter writes only the fields you set into `config.yaml` before the SDK age
 
 ### Discord Configuration
 
-The adapter accepts a closed Discord configuration under `harness.settings.platforms.discord`:
+Enable Discord under `harness.settings.platforms.discord` to use the runtime-owned Hermes gateway. It shares the existing gateway with `interfaces.api`, or starts that gateway without an API listener when the API is absent:
 
 ```yaml
+environment:
+  provider: local
+  env_names: [DISCORD_BOT_TOKEN]
 harness:
   adapter_id: nvidia.fabric.hermes
   settings:
     platforms:
       discord:
-        enabled: false
+        enabled: true
         token_env: DISCORD_BOT_TOKEN
         allowed_users: ["123456789012345678"]
         allowed_channels: ["234567890123456789"]
         require_mention: true
 ```
 
-This configures the native platform; it does not activate messaging. `enabled` defaults to `false`. Planning accepts `true`, but runtime start rejects it with `hermes_discord_activation_unsupported` before creating native state. The managed API gateway still disables Discord, and the SDK path does not start a Discord gateway. Plugin enablement does not override this restriction.
+`enabled` defaults to `false`. SDK execution remains optional: `sdk.enabled: false` is valid with Discord enabled, even without another native interface. Plugin enablement alone does not select a messaging channel. Other platforms stay disabled, regardless of inherited tokens.
 
-`token_env` names an environment variable holding the token or credential-provider placeholder. The adapter writes a `${VAR}` reference into Hermes's configuration without reading the value. Omission retains Hermes's native `DISCORD_BOT_TOKEN` convention. Keep raw tokens out of configuration and run plans. The user and channel lists accept nonzero decimal ID strings of at most 20 digits; inline `token`, wildcard IDs, other platforms, and unknown fields are rejected. Allowlists and `require_mention` map to the native platform's `extra` section. Omitted fields retain Hermes's defaults; empty lists do not establish deny-all authorization.
+`token_env` names an environment variable holding the token or credential-provider placeholder. Forward it with `environment.env_names` or supply it through the deployment's credential provider. The adapter checks availability but writes only a `${VAR}` reference into native configuration. Omission retains Hermes's `DISCORD_BOT_TOKEN` convention. Keep raw tokens out of configuration and run plans. The user and channel lists accept nonzero decimal ID strings of at most 20 digits; inline `token`, wildcard IDs, other platforms, and unknown fields are rejected. Allowlists and `require_mention` map to the native platform's `extra` section. Omitted fields retain Hermes's defaults; empty lists do not establish deny-all authorization.
 
-The operator still supplies compatible Discord client dependencies, credential delivery, outbound REST/WebSocket policy, and Discord application permissions. None are provisioned by this setting. Managed channel startup, authentication readiness, reconnect behavior, and shutdown remain future work.
+The operator supplies compatible `discord.py` dependencies, credential delivery, outbound REST/WebSocket policy, and Discord application permissions and intents. Missing credentials or the client library fail before native state is created, with `hermes_discord_credential_missing` or `hermes_discord_dependency_missing` respectively. Fabric does not install packages or provision network access.
+
+Startup waits within the existing interface deadline for the owned gateway's fresh native status to report Discord connected. An API health response alone is insufficient. With Discord enabled, `active` and `ready` checks include connection status even when the SDK is healthy, and `live` checks child-process liveness. Missing, stale, or foreign-process status cannot pass readiness. Hermes owns WebSocket heartbeats and reconnects; Fabric adds no reconnect loop. A connected status does not establish message delivery or inference success.
+
+Stopping the runtime stops the same owned gateway using existing process-group cleanup; in-flight messages may be interrupted. Discord sessions are separate from SDK conversations. Retain the Hermes home through the existing state/storage contract when its native data must survive replacement.
 
 ### Skills
 
@@ -263,7 +270,7 @@ Startup removes stale `interfaces/api.token`, `interfaces/tui.json`, `interfaces
 
 Managed native processes run through the adapter's launcher without modifying the installed Hermes source. Independently started processes do not automatically receive the adapter's configuration mapping.
 
-The managed API gateway disables ambient messaging platforms and profile multiplexing. Inherited settings such as `TELEGRAM_BOT_TOKEN` do not start chat-channel dependency installers in this runtime.
+The managed gateway disables unselected messaging platforms and profile multiplexing. Only explicitly enabled Discord may run alongside the API. Inherited settings such as `TELEGRAM_BOT_TOKEN` do not select another channel.
 
 ## Health and Shutdown
 
