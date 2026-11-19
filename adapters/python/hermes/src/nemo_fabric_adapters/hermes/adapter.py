@@ -478,10 +478,11 @@ class HermesRuntime:
                     self._hermes_config["platforms"] = {
                         name: {
                             **self._hermes_config.get("platforms", {}).get(name, {}),
-                            "enabled": discord and name == "discord",
+                            "enabled": ("api" in interface_ports)
+                            if name == "api_server"
+                            else discord and name == "discord",
                         }
                         for name in platform_ids(self._hermes_home)
-                        if name != "api_server"
                     }
                     self._hermes_config["gateway"] = {"multiplex_profiles": False}
                     self._hermes_config_path.write_text(

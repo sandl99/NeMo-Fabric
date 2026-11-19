@@ -247,6 +247,8 @@ def build_hermes_config(
         if extra:
             platform["extra"] = extra
         config["platforms"] = {"discord": platform}
+        if platform["enabled"] and "api" not in interfaces:
+            config["platforms"]["api_server"] = {"enabled": False}
 
     return config
 
