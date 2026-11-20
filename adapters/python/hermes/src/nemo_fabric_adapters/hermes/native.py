@@ -22,41 +22,65 @@ from functools import wraps
 
 from nemo_fabric_adapter_contract.models import AgentConfig
 from nemo_fabric_adapters.hermes import configuration
+from nemo_fabric_adapters.hermes import interfaces
 from nemo_fabric_adapters.hermes import telemetry
 
 LOGGER = logging.getLogger(__name__)
-_discord_home: Path | None = None
-_discord_environment: dict[str, str] = {}
+_channel_home: Path | None = None
+_channel_environment: dict[str, str] = {}
 
 
-def configure_discord_environment(config: AgentConfig) -> None:
+def configure_messaging_environment(config: AgentConfig) -> None:
     """Keep selected native values authoritative across Hermes environment reloads."""
-    global _discord_home, _discord_environment
-    discord = configuration._settings(config).get("platforms", {}).get("discord", {})
-    if not discord.get("enabled", False):
+    global _channel_home, _channel_environment
+    settings = configuration._settings(config)
+    channels = interfaces.selected_channels(settings)
+    if not channels:
         return
-    token_env = discord.get("token_env", "DISCORD_BOT_TOKEN")
-    credential = os.environ[token_env]
-    selected = {token_env: credential, "DISCORD_BOT_TOKEN": credential}
-    if "allowed_users" in discord:
-        selected.update(
-            DISCORD_ALLOWED_USERS=",".join(discord["allowed_users"]),
-            DISCORD_ALLOWED_ROLES="",
-            DISCORD_ALLOW_ALL_USERS="false",
-            GATEWAY_ALLOWED_USERS="",
-            GATEWAY_ALLOW_ALL_USERS="false",
-        )
-    if "allowed_channels" in discord:
-        selected["DISCORD_ALLOWED_CHANNELS"] = ",".join(discord["allowed_channels"])
-    if "require_mention" in discord:
-        selected["DISCORD_REQUIRE_MENTION"] = str(discord["require_mention"]).lower()
-    already_configured = bool(_discord_environment)
-    _discord_environment = selected
+    selected: dict[str, str] = {}
+    for name in channels:
+        authored = settings["platforms"][name]
+        for field, (native_env, _) in interfaces.CHANNEL_CREDENTIALS[name].items():
+            reference = authored.get(field, native_env)
+            credential = os.environ[reference]
+            selected[reference] = credential
+            selected[native_env] = credential
+        prefix = name.upper()
+        if "allowed_users" in authored:
+            users = ",".join(authored["allowed_users"])
+            selected[f"{prefix}_ALLOWED_USERS"] = users
+            selected[f"{prefix}_ALLOW_ALL_USERS"] = "false"
+            # A shared gateway's legacy global grants cannot broaden an explicit
+            # per-channel list. Other per-channel settings remain native.
+            selected.update(GATEWAY_ALLOWED_USERS="", GATEWAY_ALLOW_ALL_USERS="false")
+            if name == "discord":
+                selected["DISCORD_ALLOWED_ROLES"] = ""
+            elif name == "telegram":
+                selected.update(
+                    TELEGRAM_GROUP_ALLOWED_USERS=users, TELEGRAM_GROUP_ALLOWED_CHATS=""
+                )
+            elif name == "weixin":
+                selected["WEIXIN_DM_POLICY"] = "allowlist"
+        for field in ("allowed_channels", "allowed_chats"):
+            if field in authored:
+                selected[f"{prefix}_{field.upper()}"] = ",".join(authored[field])
+        if "require_mention" in authored:
+            selected[f"{prefix}_REQUIRE_MENTION"] = str(
+                authored["require_mention"]
+            ).lower()
+        if name == "telegram":
+            selected["TELEGRAM_WEBHOOK_URL"] = ""
+            if "allowed_chats" in authored:
+                selected["TELEGRAM_GUEST_MODE"] = "false"
+        if name == "weixin":
+            selected["WEIXIN_GROUP_POLICY"] = "disabled"
+    already_configured = bool(_channel_environment)
+    _channel_environment = selected
     # Capture the credential before any Hermes import can reload retained .env values.
     os.environ.update(selected)
     from hermes_constants import get_hermes_home
 
-    _discord_home = get_hermes_home().resolve()
+    _channel_home = get_hermes_home().resolve()
     if already_configured:
         return
     from agent import secret_scope
@@ -64,11 +88,11 @@ def configure_discord_environment(config: AgentConfig) -> None:
     from hermes_cli import env_loader
 
     def owns(home: Path) -> bool:
-        return home.resolve() == _discord_home
+        return home.resolve() == _channel_home
 
     def reapply(home: Path) -> None:
         if owns(home):
-            os.environ.update(_discord_environment)
+            os.environ.update(_channel_environment)
 
     load_dotenv = env_loader.load_hermes_dotenv
 
@@ -94,7 +118,7 @@ def configure_discord_environment(config: AgentConfig) -> None:
     def managed_scope(hermes_home: Path, *args: Any, **kwargs: Any) -> dict[str, str]:
         result = build_scope(hermes_home, *args, **kwargs)
         if owns(Path(hermes_home)):
-            result.update(_discord_environment)
+            result.update(_channel_environment)
         return result
 
     # Translate selected Fabric settings at native reload boundaries; Hermes still
@@ -184,7 +208,7 @@ def main() -> None:
     config = AgentConfig.from_mapping(json.loads(options.fabric_config.read_text()))
 
     if arguments[:2] == ["gateway", "run"]:
-        configure_discord_environment(config)
+        configure_messaging_environment(config)
 
     import run_agent
     from hermes_cli.config import load_config

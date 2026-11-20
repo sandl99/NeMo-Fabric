@@ -54,7 +54,7 @@ def probe():
     if not os.environ.get("QA_NATIVE_BASELINE"):
         from nemo_fabric_adapter_contract.models import AgentConfig
         settings = json.loads((Path(os.environ["HERMES_HOME"]) / "fabric-config.json").read_text())
-        native.configure_discord_environment(AgentConfig.from_mapping(settings))
+        native.configure_messaging_environment(AgentConfig.from_mapping(settings))
     load_hermes_dotenv()
     reload_env()
     results["repeated_setup"] = observe()

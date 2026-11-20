@@ -56,7 +56,7 @@ def test_plan_accepts_discord_configuration_without_bot_credentials(tmp_path, en
 @pytest.mark.parametrize(
     "platforms",
     [
-        {"slack": {"enabled": False}},
+        {"signal": {"enabled": False}},
         {"discord": {"token": "inline-secret"}},
         {"discord": {"token_env": "not-an-env-name"}},
         {"discord": {"token_env": ""}},
@@ -392,3 +392,173 @@ async def test_missing_discord_library_fails_before_native_state(
     assert caught.value.code == "hermes_discord_dependency_missing"
     assert "private-bot-token" not in str(caught.value)
     assert not (tmp_path / "artifacts").exists()
+
+
+@pytest.mark.parametrize("channel", ["telegram", "slack", "weixin"])
+@pytest.mark.parametrize("api", [False, True])
+async def test_selected_channels_share_gateway_and_require_connection(
+    managed_gateway, channel, api
+):
+    managed = managed_gateway
+    agent = AgentConfig.from_mapping(_config({channel: {"enabled": True}}))
+    managed["status"].read_runtime_status.return_value["platforms"][channel] = {
+        "state": "connected",
+        "writer_pid": managed["process"].pid,
+        "writer_start_time": 100,
+    }
+    try:
+        await managed["owner"].start(
+            {"api": 8642} if api else {},
+            hermes_home=managed["home"],
+            token_path=managed["token_path"],
+            timeout=1,
+            environment={},
+            agent_config=agent,
+        )
+        assert managed["spawn"].await_count == 1
+        assert await managed["owner"].check("ready") is None
+        managed["status"].read_runtime_status.return_value["platforms"][channel][
+            "state"
+        ] = "retrying"
+        assert await managed["owner"].check("ready") == "endpoint_unavailable"
+    finally:
+        await managed["owner"].stop()
+
+
+@pytest.mark.parametrize(
+    "channel,missing,field",
+    [
+        ("telegram", "TELEGRAM_BOT_TOKEN", "token_env"),
+        ("slack", "SLACK_BOT_TOKEN", "bot_token_env"),
+        ("slack", "SLACK_APP_TOKEN", "app_token_env"),
+        ("weixin", "WEIXIN_TOKEN", "token_env"),
+        ("weixin", "WEIXIN_ACCOUNT_ID", "account_id_env"),
+    ],
+)
+async def test_channel_credentials_fail_before_creating_native_state(
+    tmp_path, monkeypatch, channel, missing, field
+):
+    for variable in [
+        "TELEGRAM_BOT_TOKEN",
+        "SLACK_BOT_TOKEN",
+        "SLACK_APP_TOKEN",
+        "WEIXIN_TOKEN",
+        "WEIXIN_ACCOUNT_ID",
+    ]:
+        monkeypatch.setenv(variable, "fixture-only-credential")
+    monkeypatch.delenv(missing)
+    runtime = HermesRuntime()
+    with pytest.raises(LifecycleError) as caught:
+        await runtime.start(
+            {
+                "base_dir": str(tmp_path),
+                "config": AgentConfig.from_mapping(
+                    _config({channel: {"enabled": True}})
+                ),
+                "runtime_context": {
+                    "runtime_id": "channel-preflight",
+                    "invocation_id": "start",
+                    "request_id": "start",
+                    "artifacts": {},
+                    "environment": {
+                        "environment_id": "local",
+                        "provider": "local",
+                        "ownership": "caller_owned",
+                        "control_location": "in_env_control",
+                    },
+                },
+            }
+        )
+    assert caught.value.code == f"hermes_{channel}_credential_missing"
+    assert (
+        caught.value.metadata["field"]
+        == f"harness.settings.platforms.{channel}.{field}"
+    )
+    assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    "channel,module",
+    [
+        ("telegram", "telegram"),
+        ("slack", "slack_bolt"),
+        ("slack", "slack_sdk"),
+        ("weixin", "aiohttp"),
+        ("weixin", "cryptography"),
+    ],
+)
+async def test_missing_channel_dependency_fails_before_native_state(
+    tmp_path, monkeypatch, channel, module
+):
+    for variable in [
+        "TELEGRAM_BOT_TOKEN",
+        "SLACK_BOT_TOKEN",
+        "SLACK_APP_TOKEN",
+        "WEIXIN_TOKEN",
+        "WEIXIN_ACCOUNT_ID",
+    ]:
+        monkeypatch.setenv(variable, "fixture-only-credential")
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name: None if name == module else MagicMock(),
+    )
+    runtime = HermesRuntime()
+    with pytest.raises(LifecycleError) as caught:
+        await runtime.start(
+            {
+                "base_dir": str(tmp_path),
+                "config": AgentConfig.from_mapping(
+                    _config({channel: {"enabled": True}})
+                ),
+                "runtime_context": {
+                    "runtime_id": "channel-preflight",
+                    "invocation_id": "start",
+                    "request_id": "start",
+                    "artifacts": {},
+                    "environment": {
+                        "environment_id": "local",
+                        "provider": "local",
+                        "ownership": "caller_owned",
+                        "control_location": "in_env_control",
+                    },
+                },
+            }
+        )
+    assert caught.value.code == f"hermes_{channel}_dependency_missing"
+    assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("api", [False, True])
+async def test_all_channels_share_one_gateway_and_each_must_be_connected(
+    managed_gateway, api
+):
+    managed = managed_gateway
+    names = ["discord", "telegram", "slack", "weixin"]
+    statuses = managed["status"].read_runtime_status.return_value["platforms"]
+    for name in names:
+        statuses[name] = {
+            "state": "connected",
+            "writer_pid": managed["process"].pid,
+            "writer_start_time": 100,
+        }
+    agent = AgentConfig.from_mapping(
+        _config({name: {"enabled": True} for name in names})
+    )
+    try:
+        await managed["owner"].start(
+            {"api": 8642} if api else {},
+            hermes_home=managed["home"],
+            token_path=managed["token_path"],
+            timeout=1,
+            environment={},
+            agent_config=agent,
+        )
+        assert managed["spawn"].await_count == 1
+        for name in names:
+            statuses[name]["state"] = "retrying"
+            assert await managed["owner"].check("ready") == "endpoint_unavailable"
+            statuses[name]["state"] = "connected"
+            assert await managed["owner"].check("ready") is None
+    finally:
+        await managed["owner"].stop()

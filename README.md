@@ -27,7 +27,7 @@ Invocation response and artifact budgets are configured under
 [`runtime.response_limits`](docs/sdk/python.mdx#response-and-artifact-limits),
 with the same policy for host and OpenShell execution.
 
-The Hermes adapter can run [Discord on its managed gateway](adapters/python/hermes/README.md#discord-configuration), with or without its HTTP API.
+The Hermes adapter can run [Discord, Telegram, Slack, and personal WeChat on its managed gateway](adapters/python/hermes/README.md#messaging-channels), with or without its HTTP API.
 
 ## Supported Agent Harnesses
 

@@ -32,6 +32,29 @@ STOP_GRACE_SECONDS = 5.0
 # Hermes's gateway waits this long for in-flight API runs and cron jobs on
 # SIGTERM, so it exits within STOP_GRACE_SECONDS.
 GATEWAY_DRAIN_TIMEOUT_SECONDS = 3
+# Reference field -> (native environment variable, native config field).
+CHANNEL_CREDENTIALS = {
+    "discord": {"token_env": ("DISCORD_BOT_TOKEN", "token")},
+    "telegram": {"token_env": ("TELEGRAM_BOT_TOKEN", "token")},
+    "slack": {
+        "bot_token_env": ("SLACK_BOT_TOKEN", "token"),
+        "app_token_env": ("SLACK_APP_TOKEN", None),
+    },
+    "weixin": {
+        "token_env": ("WEIXIN_TOKEN", "token"),
+        "account_id_env": ("WEIXIN_ACCOUNT_ID", "account_id"),
+    },
+}
+CHANNEL_DEPENDENCIES = {
+    "discord": {"discord": "discord.py"},
+    "telegram": {"telegram": "python-telegram-bot"},
+    "slack": {
+        "slack_bolt": "slack-bolt",
+        "slack_sdk": "slack-sdk",
+        "aiohttp": "aiohttp",
+    },
+    "weixin": {"aiohttp": "aiohttp", "cryptography": "cryptography"},
+}
 
 
 def interface_ports(settings: dict[str, Any]) -> dict[str, int]:
@@ -58,9 +81,14 @@ def interface_ports(settings: dict[str, Any]) -> dict[str, int]:
     return ports
 
 
-def discord_enabled(settings: dict[str, Any]) -> bool:
-    """Whether the runtime explicitly selects the Discord platform."""
-    return settings.get("platforms", {}).get("discord", {}).get("enabled", False)
+def selected_channels(settings: dict[str, Any]) -> tuple[str, ...]:
+    """Return explicitly enabled managed messaging platforms."""
+    platforms = settings.get("platforms", {})
+    return tuple(
+        name
+        for name in CHANNEL_CREDENTIALS
+        if platforms.get(name, {}).get("enabled", False)
+    )
 
 
 def startup_timeout(settings: dict[str, Any]) -> float:
@@ -86,7 +114,8 @@ class _Child:
     port: int | None
     process: asyncio.subprocess.Process
     tui_token: str | None = field(default=None, repr=False)
-    discord_status_path: Path | None = None
+    channel_status_path: Path | None = None
+    channels: tuple[str, ...] = ()
 
 
 class InterfaceChildren:
@@ -124,11 +153,11 @@ class InterfaceChildren:
                     },
                 )
         web_dist = _web_dist() if "dashboard" in ports else None
-        discord = discord_enabled(
+        channels = selected_channels(
             agent_config.harness.settings if agent_config.harness else {}
         )
         backends: dict[str, int | None] = dict(ports)
-        if discord and "api" not in ports:
+        if channels and "api" not in ports:
             backends["gateway"] = None
         token = secrets.token_urlsafe(32)
         tui_token = secrets.token_urlsafe(32)
@@ -183,8 +212,9 @@ class InterfaceChildren:
                         process,
                         tui_token if name in {"dashboard", "terminal"} else None,
                         hermes_home / "gateway_state.json"
-                        if discord and name in {"api", "gateway"}
+                        if channels and name in {"api", "gateway"}
                         else None,
+                        channels if name in {"api", "gateway"} else (),
                     )
                 )
             for child in self._children:
@@ -323,12 +353,12 @@ async def _child_reason(child: _Child, level: str) -> str | None:
             return "endpoint_unavailable"
         if child.tui_token and not await tui_ready(child.port, child.tui_token):
             return "endpoint_unavailable"
-    if child.discord_status_path is not None:
-        return await asyncio.to_thread(_discord_reason, child)
+    if child.channel_status_path is not None:
+        return await asyncio.to_thread(_channel_reason, child)
     return None
 
 
-def _discord_reason(child: _Child) -> str | None:
+def _channel_reason(child: _Child) -> str | None:
     """Use the owned gateway's fresh native connection status, never its logs."""
     from gateway.status import (
         read_runtime_status,
@@ -337,7 +367,7 @@ def _discord_reason(child: _Child) -> str | None:
         start_time_fingerprints_match,
     )
 
-    record = read_runtime_status(child.discord_status_path)
+    record = read_runtime_status(child.channel_status_path)
     if (
         record is None
         or record.get("pid") != child.process.pid
@@ -346,19 +376,20 @@ def _discord_reason(child: _Child) -> str | None:
         or record.get("gateway_state") != "running"
     ):
         return "endpoint_unavailable"
-    discord = record.get("platforms", {}).get("discord", {})
-    if (
-        discord.get("state") != "connected"
-        or discord.get("writer_pid") != child.process.pid
-    ):
-        return "endpoint_unavailable"
-    try:
-        if not start_time_fingerprints_match(
-            discord.get("writer_start_time"), record.get("start_time")
+    for name in child.channels:
+        platform = record.get("platforms", {}).get(name, {})
+        if (
+            platform.get("state") != "connected"
+            or platform.get("writer_pid") != child.process.pid
         ):
             return "endpoint_unavailable"
-    except (TypeError, ValueError):
-        return "endpoint_unavailable"
+        try:
+            if not start_time_fingerprints_match(
+                platform.get("writer_start_time"), record.get("start_time")
+            ):
+                return "endpoint_unavailable"
+        except (TypeError, ValueError):
+            return "endpoint_unavailable"
     return None
 
 

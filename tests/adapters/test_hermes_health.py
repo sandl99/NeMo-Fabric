@@ -367,3 +367,18 @@ async def test_health_obtains_fresh_evidence_after_an_older_probe_fails(
     finally:
         release.set()
         await asyncio.gather(pending, checking, return_exceptions=True)
+
+
+@pytest.mark.parametrize("channel", ["telegram", "slack", "weixin"])
+@pytest.mark.parametrize("level", ["live", "active", "ready"])
+async def test_selected_channel_failure_is_visible_with_a_healthy_sdk(
+    hermes_health, channel, level
+):
+    runtime, _ = hermes_health
+    runtime._settings = {"platforms": {channel: {"enabled": True}}}
+    runtime._interfaces.check = AsyncMock(return_value="agent_exited")
+
+    result = await runtime.check(level)
+
+    assert result["outcome"] == "failed"
+    assert result["reason_code"] == "agent_exited"

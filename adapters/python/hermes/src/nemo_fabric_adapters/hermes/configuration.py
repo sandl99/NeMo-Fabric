@@ -17,6 +17,8 @@ from nemo_fabric_adapter_contract.models import McpOAuth2Config
 from nemo_fabric_adapter_contract.models import McpServiceAccountConfig
 import nemo_fabric_adapters.common.utils as common_utils
 from nemo_fabric_adapters.hermes import plugins as hermes_plugins
+from nemo_fabric_adapters.hermes.interfaces import CHANNEL_CREDENTIALS
+from nemo_fabric_adapters.hermes.interfaces import selected_channels
 from nemo_fabric_adapters.hermes.interfaces import GATEWAY_DRAIN_TIMEOUT_SECONDS
 from nemo_fabric_adapters.hermes.skills import SkillPlan
 
@@ -190,10 +192,8 @@ def build_hermes_config(
         ),
     }
 
-    discord_enabled = (
-        settings.get("platforms", {}).get("discord", {}).get("enabled", False)
-    )
-    if interfaces or discord_enabled:
+    channels = selected_channels(settings)
+    if interfaces or channels:
         config["model"] = _interface_model(model_config)
         if model_config.base_url and config["model"].get("provider") == "custom":
             # Hermes ignores model.api_key for openrouter.ai and reads
@@ -204,7 +204,7 @@ def build_hermes_config(
                     "key_env": _api_key_env(model_config),
                 }
             }
-    if "api" in interfaces or discord_enabled:
+    if "api" in interfaces or channels:
         config["agent"]["cron_drain_timeout"] = GATEWAY_DRAIN_TIMEOUT_SECONDS
         config["agent"]["restart_drain_timeout"] = 0
 
@@ -234,21 +234,47 @@ def build_hermes_config(
     if plugins:
         config["plugins"] = plugins
 
-    discord = settings.get("platforms", {}).get("discord")
-    if discord is not None:
-        platform: dict[str, Any] = {"enabled": discord.get("enabled", False)}
-        if "token_env" in discord:
-            platform["token"] = f"${{{discord['token_env']}}}"
-        extra = {
-            name: discord[name]
-            for name in ("allowed_users", "allowed_channels", "require_mention")
-            if name in discord
-        }
+    platforms = {}
+    for name, authored in settings.get("platforms", {}).items():
+        platform: dict[str, Any] = {"enabled": authored.get("enabled", False)}
+        extra: dict[str, Any] = {}
+        for field, (_, native_field) in CHANNEL_CREDENTIALS[name].items():
+            if field in authored and native_field:
+                reference = f"${{{authored[field]}}}"
+                if native_field == "token":
+                    platform["token"] = reference
+                else:
+                    extra[native_field] = reference
+        for field in (
+            "allowed_users",
+            "allowed_channels",
+            "allowed_chats",
+            "require_mention",
+        ):
+            if field not in authored:
+                continue
+            native_field = (
+                "allow_from"
+                if field == "allowed_users" and name != "discord"
+                else field
+            )
+            extra[native_field] = authored[field]
+        if name == "telegram":
+            if "allowed_users" in authored:
+                extra["group_allow_from"] = authored["allowed_users"]
+            if "allowed_chats" in authored:
+                extra["guest_mode"] = False
+        if name == "weixin" and platform["enabled"]:
+            extra["group_policy"] = "disabled"
+            if "allowed_users" in authored:
+                extra["dm_policy"] = "allowlist"
         if extra:
             platform["extra"] = extra
-        config["platforms"] = {"discord": platform}
-        if platform["enabled"] and "api" not in interfaces:
-            config["platforms"]["api_server"] = {"enabled": False}
+        platforms[name] = platform
+    if platforms:
+        config["platforms"] = platforms
+    if channels and "api" not in interfaces:
+        config["platforms"]["api_server"] = {"enabled": False}
 
     return config
 

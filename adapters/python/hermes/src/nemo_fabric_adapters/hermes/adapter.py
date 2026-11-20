@@ -238,24 +238,27 @@ class HermesRuntime:
                 telemetry.validate_hermes_relay_compatibility()
             self._agent_config = agent_config
             self._settings = configuration._settings(agent_config)
-            discord = interfaces.discord_enabled(self._settings)
-            if discord:
-                token_env = self._settings["platforms"]["discord"].get(
-                    "token_env", "DISCORD_BOT_TOKEN"
-                )
-                if not os.environ.get(token_env):
-                    raise lifecycle.LifecycleError(
-                        "hermes_discord_credential_missing",
-                        f"Discord requires the credential environment variable {token_env}",
-                        metadata={
-                            "field": "harness.settings.platforms.discord.token_env"
-                        },
-                    )
-                if importlib.util.find_spec("discord") is None:
-                    raise lifecycle.LifecycleError(
-                        "hermes_discord_dependency_missing",
-                        "Discord requires discord.py in the Hermes interpreter environment",
-                    )
+            channels = interfaces.selected_channels(self._settings)
+            for name in channels:
+                platform = self._settings["platforms"][name]
+                for field, (native_env, _) in interfaces.CHANNEL_CREDENTIALS[
+                    name
+                ].items():
+                    variable = platform.get(field, native_env)
+                    if not os.environ.get(variable):
+                        raise lifecycle.LifecycleError(
+                            f"hermes_{name}_credential_missing",
+                            f"{name.title()} requires the credential environment variable {variable}",
+                            metadata={
+                                "field": f"harness.settings.platforms.{name}.{field}"
+                            },
+                        )
+                for module, package in interfaces.CHANNEL_DEPENDENCIES[name].items():
+                    if importlib.util.find_spec(module) is None:
+                        raise lifecycle.LifecycleError(
+                            f"hermes_{name}_dependency_missing",
+                            f"{name.title()} requires {package} in the Hermes interpreter environment",
+                        )
             interface_ports = interfaces.interface_ports(self._settings)
             self._sdk_enabled = self._settings.get("sdk", {}).get("enabled", True)
             if runtime_context.session_ref is not None and not self._sdk_enabled:
@@ -263,10 +266,10 @@ class HermesRuntime:
                     "session_resume_unsupported",
                     "SessionRef resume requires the Hermes SDK backend",
                 )
-            if not self._sdk_enabled and not interface_ports and not discord:
+            if not self._sdk_enabled and not interface_ports and not channels:
                 raise lifecycle.LifecycleError(
                     "hermes_no_execution_path",
-                    "Enable the Hermes SDK, a native interface, or Discord",
+                    "Enable the Hermes SDK, a native interface, or a messaging channel",
                 )
             model_config = configuration._selected_model(agent_config)
             self._model_config = model_config
@@ -289,7 +292,7 @@ class HermesRuntime:
                     "hermes_interface_cleanup_failed",
                     "Hermes interface files could not be removed",
                 ) from error
-            if interface_ports or discord:
+            if interface_ports or channels:
                 # Refuse before Hermes's setup, whose MCP discovery can take
                 # minutes and outlast the caller's start deadline.
                 interfaces.require_supported_platform()
@@ -379,7 +382,7 @@ class HermesRuntime:
                 # environment below, so their own sync reads the same folder.
                 if skill_plan.excluded_bundled:
                     await self._stage_bundled_skills(skill_plan)
-                if interface_ports or discord:
+                if interface_ports or channels:
                     # Each native process runs Hermes's bundled sync at
                     # start, after this report. Run the same sync first, so
                     # the report observes what the interfaces load; their
@@ -469,8 +472,8 @@ class HermesRuntime:
                 with redirect_stdout(StringIO()):
                     discover_plugins(force=True)
                 plugins.check_loaded_plugins(self._settings)
-            if interface_ports or discord:
-                if "api" in interface_ports or discord:
+            if interface_ports or channels:
+                if "api" in interface_ports or channels:
                     from hermes_cli.profile_channels import platform_ids
 
                     # Only explicitly selected messaging may share the managed gateway.
@@ -480,7 +483,7 @@ class HermesRuntime:
                             **self._hermes_config.get("platforms", {}).get(name, {}),
                             "enabled": ("api" in interface_ports)
                             if name == "api_server"
-                            else discord and name == "discord",
+                            else name in channels,
                         }
                         for name in platform_ids(self._hermes_home)
                     }
@@ -986,14 +989,14 @@ class HermesRuntime:
     async def check(self, level: str) -> dict[str, Any]:
         """Observe SDK health when enabled, otherwise the native backends."""
         if (
-            (self._sdk_enabled and not interfaces.discord_enabled(self._settings))
+            (self._sdk_enabled and not interfaces.selected_channels(self._settings))
             or not self._started
             or self._stopping
             or level not in {"live", "active", "ready"}
         ):
             return await self._check_sdk(level)
         ports = interfaces.interface_ports(self._settings)
-        if not ports and not interfaces.discord_enabled(self._settings):
+        if not ports and not interfaces.selected_channels(self._settings):
             return await self._check_sdk(level)
         if self._sdk_enabled:
             sdk = await self._check_sdk(level)

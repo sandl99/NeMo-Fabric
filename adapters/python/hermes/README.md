@@ -135,6 +135,9 @@ The descriptor validates the following `harness.settings` fields:
 | `plugins` | object | None | Plugins by source, `bundled.entries` and `external` (`paths`, `entries`), each entry with `enabled`, `config`, and `capabilities`, plus Hermes's own plugin controls. Start fails when an enabled plugin didn't load. Refer to [Plugins](../../../docs/integrations/harness/hermes/hermes.mdx#plugins). Configure NeMo Relay through NeMo Fabric telemetry settings. |
 | `plugins_enabled` | array of nonempty strings | `[]` | Native Hermes plugin identifiers to enable. |
 | `platforms.discord` | object | None | Discord selection, token environment reference, allowlists, and mention behavior. The runtime starts its existing Hermes gateway when Discord is enabled; no API interface is required. |
+| `platforms.telegram` | object | None | Telegram bot token reference, numeric sender/chat allowlists, and group mention behavior. Uses native outbound long polling. |
+| `platforms.slack` | object | None | Slack bot/app token references, user/channel allowlists, and mention behavior. Uses native Socket Mode. |
+| `platforms.weixin` | object | None | Personal WeChat iLink token/account references and a DM user allowlist. Groups are disabled; native QR pairing remains separate. |
 | `save_trajectories` | boolean | `false` | Enables Hermes-native JSONL conversation trajectory saving. This is separate from normalized NeMo Fabric telemetry. |
 | `max_tokens` | positive integer | Hermes native default | Used when the selected model has no explicit `max_tokens`. A model-level limit takes precedence; if both are omitted, Hermes uses its native default. |
 | `terminal_timeout` | positive number | `60` | Limits a Hermes terminal tool operation in seconds; it does not enable a TUI. |
@@ -201,7 +204,11 @@ differs from other harnesses. The
 covers Hermes's skip reasons, agent-written skills, and bundled-skill
 handling.
 
-## Discord Configuration
+## Messaging Channels
+
+Select Discord, Telegram, Slack, or personal WeChat (`weixin`) under `harness.settings.platforms`. Every `enabled` field defaults to `false`. All selected channels share one runtime-owned Hermes gateway, alongside the API when `interfaces.api` is selected. Without the API, the same gateway starts without an API listener or API attachment token. Unselected channels stay explicitly disabled even when their credentials are inherited. Plugin enablement alone does not select a channel.
+
+### Discord Configuration
 
 Set `harness.settings.platforms.discord.enabled: true` to run Discord on the runtime-owned Hermes gateway. With `interfaces.api`, the same gateway serves the API and Discord. Without it, the gateway starts for Discord alone, without an API listener or API token:
 
@@ -225,11 +232,64 @@ harness:
 
 Explicit Discord access settings and the selected credential take precedence over inherited variables and the retained Hermes home's `.env`, including native reloads. A selected user list also excludes legacy role grants that would admit users outside that list. Omitted access settings retain native behavior. Without `interfaces.api`, native API activation stays explicitly disabled even when a retained `.env` contains API credentials.
 
-The operator installs the compatible Discord client dependencies, configures the Discord bot permissions and intents, and grants outbound REST/WebSocket access. Fabric does not install dependencies or provision credentials or network policy. Missing credentials fail with `hermes_discord_credential_missing`; a missing client library fails with `hermes_discord_dependency_missing`. Plugin enablement alone does not start a channel. Other messaging platforms remain explicitly disabled, even when their tokens are inherited.
+The operator installs the compatible Discord client dependencies, configures the Discord bot permissions and intents, and grants outbound REST/WebSocket access. Fabric does not install dependencies or provision credentials or network policy. Missing credentials fail with `hermes_discord_credential_missing`; a missing client library fails with `hermes_discord_dependency_missing`. Plugin enablement alone does not start a channel. Unselected messaging platforms remain explicitly disabled, even when their tokens are inherited.
 
 Startup uses the existing interface startup deadline and waits for the owned gateway's fresh native status to report Discord connected. An API health response alone does not establish Discord readiness. With Discord enabled, runtime `active` and `ready` checks include that native connection status even when the SDK is healthy; `live` checks process liveness. Hermes owns heartbeats and reconnects. Missing, stale, or foreign-process status cannot pass connection readiness. These checks do not prove message delivery or a model reply.
 
 Runtime stop uses the existing child-process cleanup for the shared gateway, including its bounded drain and process-group termination. In-flight Discord work can be interrupted. Discord conversations remain native Hermes conversations, separate from SDK invocations; retaining the Hermes home follows the existing `runtime.keep_state` and storage contract. Set `sdk.enabled: false` for Discord-only execution when SDK invocation is unnecessary.
+
+### Telegram, Slack, and Personal WeChat
+
+Configure only the channels you intend to enable. This example shows their settings together; credential values belong in the environment or credential provider:
+
+```yaml
+environment:
+  provider: local
+  env_names:
+    - TELEGRAM_BOT_TOKEN
+    - SLACK_BOT_TOKEN
+    - SLACK_APP_TOKEN
+    - WEIXIN_TOKEN
+    - WEIXIN_ACCOUNT_ID
+harness:
+  adapter_id: nvidia.fabric.hermes
+  settings:
+    sdk:
+      enabled: false
+    platforms:
+      telegram:
+        enabled: true
+        token_env: TELEGRAM_BOT_TOKEN
+        allowed_users: ["123456789"]
+        allowed_chats: ["-1001234567890"]
+        require_mention: true
+      slack:
+        enabled: true
+        bot_token_env: SLACK_BOT_TOKEN
+        app_token_env: SLACK_APP_TOKEN
+        allowed_users: ["U0123456789"]
+        allowed_channels: ["C0123456789"]
+        require_mention: true
+      weixin:
+        enabled: true
+        token_env: WEIXIN_TOKEN
+        account_id_env: WEIXIN_ACCOUNT_ID
+        allowed_users: ["peer@im.wechat"]
+```
+
+Telegram user IDs are positive decimal strings. Chat IDs accept negative group/supergroup IDs. `allowed_chats` maps to native chat gating; sender authorization remains separate. Selecting chat restrictions disables the legacy guest-mode bypass. Slack user IDs use `U`/`W` prefixes and channel IDs use `C`/`G`; channel restrictions do not replace DM sender authorization. Weixin peer IDs are opaque strings without whitespace, commas, or wildcard entries. Its selected user list uses native DM allowlist policy. Personal WeChat groups remain disabled because iLink bot identities typically do not receive ordinary group events.
+
+`token_env`, Slack's `bot_token_env`/`app_token_env`, and Weixin's `account_id_env` default to the conventional variable names shown above. Raw credential fields and wildcard allowlists are rejected. Operators provide compatible `python-telegram-bot`, `slack-bolt`/`slack-sdk`, or Weixin's `aiohttp`/`cryptography` dependencies. Fabric checks required variables and imports before starting native channels; it does not install clients, create bots, or perform interactive QR login. Native Weixin QR account files are separate from the declared references.
+
+Telegram long polling, Slack Socket Mode, and Weixin iLink long polling use outbound connections. This managed configuration does not select Telegram webhook mode or require inbound callbacks or port forwarding. Operators still grant the required network access and service permissions.
+
+### Shared Access and Lifecycle
+
+Explicit channel settings and selected credential values take precedence over ambient variables and the retained Hermes home's `.env`, including reloads and rebuilt native secret scopes. If any channel declares `allowed_users`, legacy gateway-wide user and allow-all grants are suppressed for the shared gateway. Use per-channel user lists when enabling multiple channels. Other omitted channel settings retain native behavior; empty lists do not establish deny-all authorization.
+
+Startup waits within the shared deadline for fresh native `connected` status from every selected channel, with owned-process identity checks. Runtime `active` and `ready` checks include all selected channels even when the SDK is healthy; `live` checks process liveness. Weixin publishes `connected` after starting its poll task, before an authenticated poll response, so that state does not establish successful Weixin authentication. Native status does not prove message delivery or a model reply on any channel.
+
+Hermes owns polling, WebSocket heartbeats, reconnects, authorization, and native conversations. Fabric reuses its existing process cleanup; runtime stop can interrupt in-flight messages. Channel conversations remain separate from SDK invocations. Retain the Hermes home through the existing state/storage contract when native history and Weixin account/context files must survive replacement.
 
 ## Configuration Mapping and Ownership
 

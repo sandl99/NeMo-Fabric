@@ -25,7 +25,7 @@
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
                 "maxLength": 128,
-                "description": "Environment variable holding the bot token or gateway placeholder. Written as a native ${VAR} reference, never resolved by the adapter. Omit to retain Hermes's DISCORD_BOT_TOKEN convention."
+                "description": "Environment variable holding the Discord bot token or gateway placeholder. Adapter configuration stores only the reference, not the value. Defaults to DISCORD_BOT_TOKEN."
               },
               "allowed_users": {
                 "type": "array",
@@ -52,6 +52,125 @@
             },
             "additionalProperties": false,
             "description": "Hermes-native Discord configuration. Activation uses the managed gateway and requires operator-provided credentials, dependencies, and network access."
+          },
+          "telegram": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false,
+                "description": "Start Telegram on the runtime-owned Hermes gateway; the API interface is optional."
+              },
+              "token_env": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "maxLength": 128,
+                "description": "Environment variable holding the Telegram bot token or gateway placeholder. Adapter configuration stores only the reference, not the value. Defaults to TELEGRAM_BOT_TOKEN."
+              },
+              "allowed_users": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,19}$"
+                },
+                "uniqueItems": true,
+                "description": "Telegram numeric sender IDs. Wildcards and username aliases are not accepted."
+              },
+              "allowed_chats": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^-?[1-9][0-9]{0,19}$"
+                },
+                "uniqueItems": true,
+                "description": "Telegram chat IDs, including negative group/supergroup IDs. Native chat gating and sender authorization are distinct."
+              },
+              "require_mention": {
+                "type": "boolean",
+                "description": "Native group-message mention behavior; omission retains Hermes defaults."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Telegram uses native outbound long polling, not an inbound webhook. Dependencies, credentials, and network access are operator-provided."
+          },
+          "slack": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false,
+                "description": "Start Slack on the runtime-owned Hermes gateway; the API interface is optional."
+              },
+              "bot_token_env": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "maxLength": 128,
+                "description": "Environment variable holding the Slack bot token. Adapter configuration stores only the reference, not the value. Defaults to SLACK_BOT_TOKEN."
+              },
+              "app_token_env": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "maxLength": 128,
+                "description": "Environment variable holding the Slack Socket Mode app token. Adapter configuration stores only the reference, not the value. Defaults to SLACK_APP_TOKEN."
+              },
+              "allowed_users": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[UW][A-Z0-9]{1,63}$"
+                },
+                "uniqueItems": true,
+                "description": "Slack user IDs, not display names or wildcard grants."
+              },
+              "allowed_channels": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[CG][A-Z0-9]{1,63}$"
+                },
+                "uniqueItems": true,
+                "description": "Slack public/private channel IDs. Direct messages follow native sender authorization separately."
+              },
+              "require_mention": {
+                "type": "boolean",
+                "description": "Native channel-message mention behavior; omission retains Hermes defaults."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Slack uses its native outbound Socket Mode connection. Both bot and app credentials, compatible dependencies, and network access are required."
+          },
+          "weixin": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false,
+                "description": "Start personal WeChat (Weixin) on the runtime-owned Hermes gateway; the API interface is optional."
+              },
+              "token_env": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "maxLength": 128,
+                "description": "Environment variable holding the iLink bot token obtained through native QR setup. Adapter configuration stores only the reference, not the value. Defaults to WEIXIN_TOKEN."
+              },
+              "account_id_env": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "maxLength": 128,
+                "description": "Environment variable holding the iLink bot account ID obtained through native QR setup. Adapter configuration stores only the reference, not the value. Defaults to WEIXIN_ACCOUNT_ID."
+              },
+              "allowed_users": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[^\\s\\x00-\\x1f\\x7f*,]+$"
+                },
+                "uniqueItems": true,
+                "description": "Opaque iLink peer IDs. A selected list uses native DM allowlist policy; whitespace, commas, and wildcards are rejected."
+              }
+            },
+            "additionalProperties": false,
+            "description": "Personal WeChat uses native iLink long polling. Groups are disabled. Native QR account files and credential provisioning are separate from these settings."
           }
         },
         "additionalProperties": false,
@@ -291,7 +410,7 @@
           "enabled": {
             "type": "boolean",
             "default": true,
-            "description": "Initialize the embedded SDK agent during startup. Disable with a native interface or explicitly enabled Discord; SDK invocation then fails explicitly."
+            "description": "Initialize the embedded SDK agent during startup. Disable with a native interface or explicitly enabled messaging channel; SDK invocation then fails explicitly."
           }
         },
         "additionalProperties": false,
@@ -383,21 +502,76 @@
             ],
             "properties": {
               "platforms": {
-                "required": [
-                  "discord"
-                ],
-                "properties": {
-                  "discord": {
+                "anyOf": [
+                  {
                     "required": [
-                      "enabled"
+                      "discord"
                     ],
                     "properties": {
-                      "enabled": {
-                        "const": true
+                      "discord": {
+                        "required": [
+                          "enabled"
+                        ],
+                        "properties": {
+                          "enabled": {
+                            "const": true
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "required": [
+                      "telegram"
+                    ],
+                    "properties": {
+                      "telegram": {
+                        "required": [
+                          "enabled"
+                        ],
+                        "properties": {
+                          "enabled": {
+                            "const": true
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "required": [
+                      "slack"
+                    ],
+                    "properties": {
+                      "slack": {
+                        "required": [
+                          "enabled"
+                        ],
+                        "properties": {
+                          "enabled": {
+                            "const": true
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "required": [
+                      "weixin"
+                    ],
+                    "properties": {
+                      "weixin": {
+                        "required": [
+                          "enabled"
+                        ],
+                        "properties": {
+                          "enabled": {
+                            "const": true
+                          }
+                        }
                       }
                     }
                   }
-                }
+                ]
               }
             }
           }
